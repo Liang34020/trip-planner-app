@@ -1,8 +1,16 @@
 // src/components/layout/MiddlePanel.tsx
 
-import { Calendar, Clock, MapPin, ArrowRight } from 'lucide-react';
+import { Calendar, Clock, MapPin, ArrowRight, Trash2 } from 'lucide-react';
+import { useDroppable } from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useAppStore } from '../../store/appStore';
-import { TRANSPORT_LABELS } from '../../types/models';
+import { getTransportLabel } from '../../types/models';
+import type { ItineraryItem } from '../../types/models';
 
 export function MiddlePanel() {
   const { currentTrip, itineraryDays } = useAppStore();
@@ -54,16 +62,29 @@ export function MiddlePanel() {
 }
 
 /**
- * 單日行程欄
+ * 🆕 可放置的單日行程欄
  */
 function DayColumn({ day }: { day: any }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: day.day_id,
+    data: {
+      type: 'day',
+      day,
+    },
+  });
+
+  const itemIds = day.items.map((item: any) => item.item_id);
+
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+    <div
+      ref={setNodeRef}
+      className={`bg-white rounded-lg border shadow-sm transition-all ${
+        isOver ? 'border-primary-500 border-2 ring-2 ring-primary-200' : 'border-gray-200'
+      }`}
+    >
       {/* 日期標題 */}
       <div className="p-4 border-b border-gray-200 bg-gray-50">
-        <h3 className="font-semibold text-gray-900">
-          Day {day.day_number}
-        </h3>
+        <h3 className="font-semibold text-gray-900">Day {day.day_number}</h3>
         {day.date && (
           <p className="text-sm text-gray-600 mt-1">
             {new Date(day.date).toLocaleDateString('zh-TW', {
@@ -75,27 +96,35 @@ function DayColumn({ day }: { day: any }) {
         )}
       </div>
 
-      {/* 景點列表 */}
-      <div className="p-3 space-y-2 min-h-[200px]">
-        {day.items.length === 0 ? (
-          <div className="text-center py-12 text-gray-400">
-            <MapPin className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">將地點拖曳至此</p>
-          </div>
-        ) : (
-          day.items.map((item: any, idx: number) => (
-            <div key={item.item_id}>
-              <PlaceItem item={item} />
-              {idx < day.items.length - 1 && item.transport_to_next && (
-                <TransportIndicator
-                  mode={item.transport_to_next}
-                  duration={item.transport_duration_minutes}
-                />
-              )}
+      {/* 🆕 可排序的景點列表 */}
+      <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+        <div className="p-3 space-y-2 min-h-[200px]">
+          {day.items.length === 0 ? (
+            <div
+              className={`text-center py-12 rounded-lg transition-colors ${
+                isOver ? 'bg-primary-50' : 'text-gray-400'
+              }`}
+            >
+              <MapPin className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">
+                {isOver ? '放開以加入此天' : '將地點拖曳至此'}
+              </p>
             </div>
-          ))
-        )}
-      </div>
+          ) : (
+            day.items.map((item: any, idx: number) => (
+              <div key={item.item_id}>
+                <SortablePlaceItem item={item} />
+                {idx < day.items.length - 1 && item.transport_to_next && (
+                  <TransportIndicator
+                    mode={item.transport_to_next}
+                    duration={item.transport_duration_minutes}
+                  />
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </SortableContext>
 
       {/* 當日備註 */}
       {day.notes && (
@@ -108,20 +137,62 @@ function DayColumn({ day }: { day: any }) {
 }
 
 /**
- * 行程中的地點項目
+ * 🆕 可排序的地點項目
  */
-function PlaceItem({ item }: { item: any }) {
+function SortablePlaceItem({ item }: { item: ItineraryItem }) {
+  const removeItemFromDay = useAppStore(state => state.removeItemFromDay);
+
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+    isOver,
+  } = useSortable({
+    id: item.item_id,
+    data: {
+      type: 'item',
+      item,
+    },
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-shadow cursor-move">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`bg-white border rounded-lg p-3 hover:shadow-md transition-all cursor-grab active:cursor-grabbing relative group ${
+        isOver ? 'border-primary-500 border-2 bg-primary-50' : 'border-gray-200'
+      }`}
+      {...attributes}
+      {...listeners}
+    >
+      {/* 🆕 刪除按鈕 */}
+      <button
+        onClick={e => {
+          e.stopPropagation();
+          removeItemFromDay(item.item_id);
+        }}
+        className="absolute top-2 right-2 p-1 bg-red-50 text-red-600 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100"
+        title="移除此景點"
+      >
+        <Trash2 className="w-3 h-3" />
+      </button>
+
       {/* 時間 */}
       {item.scheduled_time && (
         <div className="flex items-center gap-1 text-xs text-gray-500 mb-2">
           <Clock className="w-3 h-3" />
           <span>{item.scheduled_time}</span>
           {item.duration_minutes && (
-            <span className="text-gray-400">
-              ({item.duration_minutes} 分鐘)
-            </span>
+            <span className="text-gray-400">({item.duration_minutes} 分鐘)</span>
           )}
         </div>
       )}
@@ -153,7 +224,7 @@ function TransportIndicator({
     <div className="flex items-center justify-center gap-2 py-2 text-xs text-gray-500">
       <ArrowRight className="w-3 h-3" />
       <span>
-        {TRANSPORT_LABELS[mode as keyof typeof TRANSPORT_LABELS]}
+        {getTransportLabel(mode as ItineraryItem['transport_to_next'])}
         {duration && ` (${duration} 分鐘)`}
       </span>
     </div>

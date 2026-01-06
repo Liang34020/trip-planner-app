@@ -106,3 +106,18 @@ export const PLACE_TYPE_LABELS: Record<
   cafe: '咖啡廳',
   shopping: '購物',
 };
+
+/**
+ * 🆕 型別安全的輔助函數
+ */
+export function getPlaceTypeLabel(placeType?: Place['place_type']): string {
+  if (!placeType) return '';
+  return PLACE_TYPE_LABELS[placeType] || '';
+}
+
+export function getTransportLabel(
+  transport?: ItineraryItem['transport_to_next']
+): string {
+  if (!transport) return '';
+  return TRANSPORT_LABELS[transport] || '';
+}

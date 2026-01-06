@@ -1,8 +1,11 @@
 // src/components/layout/LeftPanel.tsx
 
-import { Search, ChevronLeft, MapPin, Star } from 'lucide-react';
+import { Search, MapPin, Star, GripVertical } from 'lucide-react';
+import { useDraggable } from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
 import { useAppStore } from '../../store/appStore';
-import { PLACE_TYPE_LABELS } from '../../types/models';
+import { getPlaceTypeLabel } from '../../types/models';
+import type { SavedPlace } from '../../types/models';
 
 export function LeftPanel() {
   const { savedPlaces, isLeftPanelCollapsed } = useAppStore();
@@ -42,7 +45,10 @@ export function LeftPanel() {
               可用地點 ({availablePlaces.length})
             </h3>
             {availablePlaces.map(savedPlace => (
-              <PlaceCard key={savedPlace.saved_id} savedPlace={savedPlace} />
+              <DraggablePlaceCard
+                key={savedPlace.saved_id}
+                savedPlace={savedPlace}
+              />
             ))}
           </div>
         )}
@@ -78,23 +84,57 @@ export function LeftPanel() {
 }
 
 /**
+ * 🆕 可拖曳的地點卡片
+ */
+function DraggablePlaceCard({ savedPlace }: { savedPlace: SavedPlace }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({
+      id: savedPlace.saved_id,
+      data: {
+        type: 'place',
+        savedPlace,
+      },
+    });
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
+      <PlaceCard savedPlace={savedPlace} isDraggable />
+    </div>
+  );
+}
+
+/**
  * 單一地點卡片
  */
 function PlaceCard({
   savedPlace,
   isPlaced = false,
+  isDraggable = false,
 }: {
-  savedPlace: any;
+  savedPlace: SavedPlace;
   isPlaced?: boolean;
+  isDraggable?: boolean;
 }) {
   const { place } = savedPlace;
 
   return (
     <div
-      className={`card mb-2 cursor-move hover:shadow-md transition-shadow ${
-        isPlaced ? 'opacity-50 cursor-not-allowed' : ''
-      }`}
+      className={`card mb-2 transition-all ${
+        isDraggable ? 'cursor-grab active:cursor-grabbing hover:shadow-md' : ''
+      } ${isPlaced ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
+      {/* 🆕 拖曳手柄 */}
+      {isDraggable && (
+        <div className="absolute top-2 right-2">
+          <GripVertical className="w-4 h-4 text-gray-400" />
+        </div>
+      )}
+
       {/* 圖片 */}
       {place.photo_url && (
         <img
@@ -120,7 +160,7 @@ function PlaceCard({
       {/* 類型標籤 */}
       {place.place_type && (
         <span className="inline-block px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded">
-          {PLACE_TYPE_LABELS[place.place_type as keyof typeof PLACE_TYPE_LABELS]}
+          {getPlaceTypeLabel(place.place_type)}
         </span>
       )}
 
