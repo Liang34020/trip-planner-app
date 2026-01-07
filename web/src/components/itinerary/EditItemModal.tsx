@@ -4,6 +4,8 @@ import { X, Clock, MessageSquare, Navigation } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import type { ItineraryItem } from '../../types/models';
 import { TRANSPORT_LABELS } from '../../types/models';
+import { isValidDuration } from '../../utils/validation';
+import { showToast } from '../../utils/toast';
 
 interface EditItemModalProps {
   item: ItineraryItem;
@@ -38,9 +40,16 @@ export function EditItemModal({
   if (!isOpen) return null;
 
   function handleSave() {
+    // 🆕 驗證停留時間
+    const duration = durationMinutes ? parseInt(durationMinutes) : undefined;
+    if (duration !== undefined && !isValidDuration(duration)) {
+      showToast.error('停留時間必須在 1-1440 分鐘之間');
+      return;
+    }
+
     onSave({
       scheduled_time: scheduledTime || undefined,
-      duration_minutes: durationMinutes ? parseInt(durationMinutes) : undefined,
+      duration_minutes: duration,
       notes: notes || undefined,
       transport_to_next: (transportToNext as ItineraryItem['transport_to_next']) || undefined,
     });
@@ -96,12 +105,14 @@ export function EditItemModal({
             <input
               type="number"
               min="0"
+              max="1440"
               step="15"
               value={durationMinutes}
               onChange={e => setDurationMinutes(e.target.value)}
               placeholder="例如：120"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             />
+            <p className="text-xs text-gray-500 mt-1">範圍：1-1440 分鐘（最多 24 小時）</p>
           </div>
 
           {/* 交通方式 */}

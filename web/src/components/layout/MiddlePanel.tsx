@@ -24,33 +24,31 @@ export function MiddlePanel() {
 
   if (!currentTrip) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <Calendar className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">
-            尚未選擇行程
-          </h3>
-          <p className="text-gray-500 mb-6">建立或選擇一個旅遊專案開始規劃</p>
-          <button className="btn-primary">+ 建立新行程</button>
+      <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-50">
+        <div className="empty-state animate-scale-in">
+          <Calendar className="empty-state-icon animate-pulse-soft" />
+          <h3 className="empty-state-title">尚未選擇行程</h3>
+          <p className="empty-state-description">建立或選擇一個旅遊專案開始規劃</p>
+          <button className="btn btn-primary">+ 建立新行程</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-gray-50 h-screen overflow-hidden">
+    <div className="flex-1 flex flex-col bg-gradient-to-br from-gray-50 via-blue-50/20 to-gray-50 h-screen overflow-hidden">
       {/* 行程標題列 */}
-      <div className="bg-white border-b border-gray-200 p-4 flex-shrink-0">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">
+      <div className="bg-white/80 backdrop-blur-sm border-b border-gray-100 p-4 flex-shrink-0 shadow-soft">
+        <h1 className="text-2xl font-bold text-gradient mb-2 animate-fade-in">
           {currentTrip.trip_name}
         </h1>
-        <div className="flex items-center gap-4 text-sm text-gray-600">
-          <span className="flex items-center gap-1">
-            <MapPin className="w-4 h-4" />
+        <div className="flex items-center gap-4 text-sm text-gray-600 animate-fade-in animation-delay-100">
+          <span className="flex items-center gap-1.5 px-2 py-1 bg-white rounded-lg shadow-sm">
+            <MapPin className="w-4 h-4 text-primary-500" />
             {currentTrip.destination}
           </span>
-          <span className="flex items-center gap-1">
-            <Calendar className="w-4 h-4" />
+          <span className="flex items-center gap-1.5 px-2 py-1 bg-white rounded-lg shadow-sm">
+            <Calendar className="w-4 h-4 text-primary-500" />
             {currentTrip.start_date} ~ {currentTrip.end_date}
           </span>
         </div>
@@ -148,15 +146,18 @@ function DayColumn({
   return (
     <div
       ref={setNodeRef}
-      className={`bg-white rounded-lg border shadow-sm transition-all flex flex-col ${
-        isOver ? 'border-primary-500 border-2 ring-2 ring-primary-200' : 'border-gray-200'
+      className={`bg-white/90 backdrop-blur-sm rounded-xl border shadow-soft transition-all duration-300 flex flex-col animate-fade-in ${
+        isOver ? 'border-primary-400 border-2 ring-4 ring-primary-100 shadow-medium scale-[1.02]' : 'border-gray-200'
       }`}
     >
       {/* 日期標題 */}
-      <div className="p-4 border-b border-gray-200 bg-gray-50 group relative">
-        <h3 className="font-semibold text-gray-900">Day {day.day_number}</h3>
+      <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-primary-50/50 to-white group relative">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 bg-primary-500 rounded-full animate-pulse-soft"></div>
+          <h3 className="font-bold text-gray-900">Day {day.day_number}</h3>
+        </div>
         {day.date && (
-          <p className="text-sm text-gray-600 mt-1">
+          <p className="text-sm text-gray-600 mt-1.5 ml-4">
             {new Date(day.date).toLocaleDateString('zh-TW', {
               month: 'long',
               day: 'numeric',
@@ -254,10 +255,12 @@ function AddDayCard() {
   return (
     <button
       onClick={addNewDay}
-      className="bg-white border-2 border-dashed border-gray-300 rounded-lg hover:border-primary-500 hover:bg-primary-50 transition-all w-full min-h-[400px] flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-primary-600"
+      className="bg-white/50 backdrop-blur-sm border-2 border-dashed border-gray-300 rounded-xl hover:border-primary-400 hover:bg-primary-50/50 transition-all duration-300 w-full min-h-[400px] flex flex-col items-center justify-center gap-3 text-gray-500 hover:text-primary-600 group animate-fade-in hover:shadow-soft hover:scale-[1.02]"
     >
-      <Plus className="w-8 h-8" />
-      <span className="font-medium">新增一天</span>
+      <div className="p-4 bg-white rounded-full shadow-soft group-hover:shadow-medium transition-all">
+        <Plus className="w-8 h-8 group-hover:rotate-90 transition-transform duration-300" />
+      </div>
+      <span className="font-semibold text-lg">新增一天</span>
     </button>
   );
 }
@@ -311,10 +314,10 @@ function SortablePlaceItem({
     <div
       ref={setNodeRef}
       style={style}
-      className={`bg-white border rounded-lg p-3 hover:shadow-md transition-all cursor-grab active:cursor-grabbing relative group ${
-        isOver ? 'border-primary-500 border-2 bg-primary-50' : 'border-gray-200'
-      }`}
-      // tabIndex={0}
+      className={`bg-white border rounded-xl p-3 transition-all duration-300 cursor-grab active:cursor-grabbing relative group ${
+        isOver ? 'border-primary-400 border-2 bg-primary-50 shadow-medium scale-[1.02]' : 'border-gray-200 hover:border-primary-300 hover:shadow-soft'
+      } ${isDragging ? 'opacity-50 scale-95' : ''}`}
+      // tabIndex={0} 可省略 內建已經有了 
       onKeyDown={handleKeyDown}
       {...attributes}
       {...listeners}

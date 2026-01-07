@@ -17,21 +17,21 @@ export function LeftPanel() {
   if (isLeftPanelCollapsed) return null;
 
   return (
-    <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-screen">
+    <div className="w-80 bg-white border-r border-gray-100 flex flex-col h-screen shadow-soft animate-slide-in-left">
       {/* 標題列 */}
-      <div className="p-4 border-b border-gray-200">
-        <h2 className="text-lg font-semibold text-gray-900">收藏池</h2>
-        <p className="text-sm text-gray-500 mt-1">拖曳地點到右側行程</p>
+      <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-primary-50 to-white">
+        <h2 className="text-lg font-bold text-gradient">收藏池</h2>
+        <p className="text-sm text-gray-600 mt-1">拖曳地點到右側行程</p>
       </div>
 
       {/* 搜尋列 */}
-      <div className="p-4 border-b border-gray-200">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+      <div className="p-4 border-b border-gray-100">
+        <div className="relative group">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-primary-500 transition-colors" />
           <input
             type="text"
             placeholder="搜尋地點..."
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
           />
         </div>
       </div>
@@ -70,10 +70,11 @@ export function LeftPanel() {
         )}
 
         {savedPlaces.length === 0 && (
-          <div className="text-center py-12">
-            <MapPin className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-            <p className="text-gray-500 text-sm">尚無收藏地點</p>
-            <button className="mt-4 text-primary-600 text-sm font-medium hover:text-primary-700">
+          <div className="empty-state animate-fade-in">
+            <MapPin className="empty-state-icon" />
+            <p className="empty-state-title">尚無收藏地點</p>
+            <p className="empty-state-description">開始搜尋並加入喜歡的地點</p>
+            <button className="btn btn-primary mt-2">
               + 新增地點
             </button>
           </div>
@@ -124,9 +125,9 @@ function PlaceCard({
 
   return (
     <div
-      className={`card mb-2 transition-all ${
-        isDraggable ? 'cursor-grab active:cursor-grabbing hover:shadow-md' : ''
-      } ${isPlaced ? 'opacity-50 cursor-not-allowed' : ''}`}
+      className={`card mb-2 transition-all duration-300 ${
+        isDraggable ? 'cursor-grab active:cursor-grabbing hover:shadow-medium hover:scale-[1.02] hover:-translate-y-1' : ''
+      } ${isPlaced ? 'opacity-60 cursor-not-allowed grayscale' : ''}`}
     >
 
       {/* 圖片 */}
@@ -181,8 +182,9 @@ function PlaceCard({
 
       {/* 已排入提示 */}
       {isPlaced && (
-        <div className="mt-2 text-xs text-green-600 font-medium">
-          ✓ 已排入行程
+        <div className="mt-2 flex items-center gap-1 text-xs text-success-600 font-medium animate-fade-in">
+          <span className="w-1.5 h-1.5 bg-success-500 rounded-full"></span>
+          已排入行程
         </div>
       )}
     </div>

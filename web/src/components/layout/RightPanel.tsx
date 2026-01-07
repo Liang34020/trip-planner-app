@@ -11,7 +11,7 @@ export function RightPanel() {
       {/* 🆕 小螢幕地圖開關按鈕 */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="lg:hidden fixed bottom-4 right-4 z-40 p-3 bg-primary-600 text-white rounded-full shadow-lg hover:bg-primary-700 transition-colors"
+        className="lg:hidden fixed bottom-4 right-4 z-40 p-4 bg-gradient-to-r from-primary-600 to-primary-500 text-white rounded-full shadow-strong hover:shadow-[0_20px_60px_-10px_rgba(59,130,246,0.5)] transition-all duration-300 hover:scale-110 active:scale-95"
         title="開啟地圖"
       >
         <Map className="w-6 h-6" />
@@ -31,23 +31,23 @@ export function RightPanel() {
         `}
       >
         {/* 標題列 */}
-        <div className="p-4 border-b border-gray-200 bg-white flex-shrink-0 flex items-center justify-between">
-          <h3 className="font-semibold text-gray-900">地圖預覽</h3>
+        <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-primary-50 to-white flex-shrink-0 flex items-center justify-between">
+          <h3 className="font-bold text-gradient">地圖預覽</h3>
           {/* 🆕 小螢幕關閉按鈕 */}
           <button
             onClick={() => setIsOpen(false)}
-            className="lg:hidden p-1 hover:bg-gray-100 rounded transition-colors"
+            className="lg:hidden p-2 hover:bg-gray-100 rounded-lg transition-all active:scale-95"
           >
             <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
 
         {/* 地圖內容 */}
-        <div className="flex-1 flex items-center justify-center p-4">
-          <div className="text-center">
-            <Map className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <h4 className="text-gray-600 font-medium mb-2">地圖功能開發中</h4>
-            <p className="text-gray-500 text-sm">未來將整合 Google Maps API</p>
+        <div className="flex-1 flex items-center justify-center p-4 bg-gradient-to-br from-gray-50 to-blue-50/30">
+          <div className="empty-state animate-pulse-soft">
+            <Map className="empty-state-icon text-primary-300" />
+            <h4 className="empty-state-title">地圖功能開發中</h4>
+            <p className="empty-state-description">未來將整合 Google Maps API</p>
           </div>
         </div>
       </div>
