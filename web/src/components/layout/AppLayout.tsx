@@ -10,7 +10,6 @@ import {
   pointerWithin,
 } from '@dnd-kit/core';
 import type { DragEndEvent, DragOverEvent } from '@dnd-kit/core';
-import { useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { LeftPanel } from './LeftPanel';
 import { MiddlePanel } from './MiddlePanel';
@@ -23,8 +22,6 @@ export function AppLayout() {
     addItemToDay,
     reorderItemInDay,
   } = useAppStore();
-
-  const [activeId, setActiveId] = useState<string | null>(null);
 
   // 🆕 配置拖曳感應器（8px 防止誤觸）
   const sensors = useSensors(
@@ -48,8 +45,6 @@ export function AppLayout() {
    */
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
-
-    setActiveId(null);
 
     if (!over) return;
 
@@ -142,14 +137,13 @@ export function AppLayout() {
     <DndContext
       sensors={sensors}
       collisionDetection={pointerWithin}
-      onDragStart={event => setActiveId(event.active.id as string)}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex h-screen overflow-hidden bg-gray-50 relative">
+      <div className="flex h-screen overflow-hidden bg-gray-50">
         {/* 收藏池（左欄）*/}
         <div
-          className={`transition-all duration-300 ease-in-out ${
+          className={`transition-all duration-300 ease-in-out flex-shrink-0 ${
             isLeftPanelCollapsed ? 'w-0' : 'w-80'
           }`}
         >
@@ -171,19 +165,17 @@ export function AppLayout() {
           )}
         </button>
 
-        {/* 行程編輯器（中欄）*/}
-        <MiddlePanel />
+        {/* 行程編輯器（中欄）- 可調整寬度 */}
+        <div className="flex-1 min-w-0">
+          <MiddlePanel />
+        </div>
 
         {/* 地圖（右欄，桌面版顯示）*/}
         <RightPanel />
       </div>
 
-      {/* 🆕 拖曳預覽 */}
-      <DragOverlay>
-        {activeId ? (
-          <div className="card opacity-80 shadow-2xl">正在拖曳...</div>
-        ) : null}
-      </DragOverlay>
+      {/* 拖曳預覽 - 隱藏預設樣式 */}
+      <DragOverlay>{null}</DragOverlay>
     </DndContext>
   );
 }

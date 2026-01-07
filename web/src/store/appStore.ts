@@ -36,6 +36,16 @@ interface AppState {
   ) => void;
   reorderItemInDay: (itemId: string, dayId: string, dropIndex: number) => void;
   removeItemFromDay: (itemId: string) => void;
+  updateItineraryItem: (itemId: string, updates: Partial<ItineraryItem>) => void;
+
+  // 🆕 Day 管理方法
+  addNewDay: () => void;
+  removeDay: (dayId: string) => void;
+  updateDayNotes: (dayId: string, notes: string) => void;
+
+  // 🆕 進階操作
+  copyItemToDay: (itemId: string, targetDayId: string) => void;
+  clearDay: (dayId: string) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -189,6 +199,167 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (relatedSavedId) {
         get().updateSavedPlaceStatus(relatedSavedId, false, undefined);
       }
+
+      return { itineraryDays: updatedDays };
+    }),
+
+  // 🆕 更新行程項目資訊
+  updateItineraryItem: (itemId, updates) =>
+    set(state => {
+      const updatedDays = state.itineraryDays.map(day => ({
+        ...day,
+        items: day.items.map(item =>
+          item.item_id === itemId
+            ? { ...item, ...updates, updated_at: new Date().toISOString() }
+            : item
+        ),
+      }));
+
+      return { itineraryDays: updatedDays };
+    }),
+
+  // 🆕 新增一天行程
+  addNewDay: () =>
+    set(state => {
+      if (!state.currentTrip) return state;
+
+      const newDayNumber = state.itineraryDays.length + 1;
+      
+      // 計算新的日期（如果有 start_date）
+      let newDate: string | undefined;
+      if (state.currentTrip.start_date) {
+        const startDate = new Date(state.currentTrip.start_date);
+        startDate.setDate(startDate.getDate() + newDayNumber - 1);
+        newDate = startDate.toISOString().split('T')[0];
+      }
+
+      const newDay: ItineraryDay = {
+        day_id: `day_${Date.now()}`,
+        trip_id: state.currentTrip.trip_id,
+        day_number: newDayNumber,
+        date: newDate,
+        items: [],
+      };
+
+      return { itineraryDays: [...state.itineraryDays, newDay] };
+    }),
+
+  // 🆕 刪除一天行程
+  removeDay: dayId =>
+    set(state => {
+      // 找到要刪除的 Day 中的所有項目
+      const dayToRemove = state.itineraryDays.find(d => d.day_id === dayId);
+      if (!dayToRemove) return state;
+
+      // 將該天的所有項目從收藏池中恢復可拖曳狀態
+      dayToRemove.items.forEach(item => {
+        const savedPlace = state.savedPlaces.find(
+          sp => sp.place_id === item.place_id && sp.current_itinerary_item_id === item.item_id
+        );
+        if (savedPlace) {
+          get().updateSavedPlaceStatus(savedPlace.saved_id, false, undefined);
+        }
+      });
+
+      // 移除該天並重新編號 + 重新計算日期
+      const updatedDays = state.itineraryDays
+        .filter(d => d.day_id !== dayId)
+        .map((day, index) => {
+          const newDayNumber = index + 1;
+          
+          // 🆕 重新計算日期（基於 trip 的 start_date）
+          let newDate: string | undefined;
+          if (state.currentTrip?.start_date) {
+            const startDate = new Date(state.currentTrip.start_date);
+            startDate.setDate(startDate.getDate() + index);
+            newDate = startDate.toISOString().split('T')[0];
+          }
+
+          return {
+            ...day,
+            day_number: newDayNumber,
+            date: newDate,
+          };
+        });
+
+      return { itineraryDays: updatedDays };
+    }),
+
+  // 🆕 更新當日備註
+  updateDayNotes: (dayId, notes) =>
+    set(state => {
+      const updatedDays = state.itineraryDays.map(day =>
+        day.day_id === dayId ? { ...day, notes } : day
+      );
+
+      return { itineraryDays: updatedDays };
+    }),
+
+  // 🆕 複製景點到其他 Day
+  copyItemToDay: (itemId, targetDayId) =>
+    set(state => {
+      // 找到原始項目
+      let sourceItem: ItineraryItem | null = null;
+      for (const day of state.itineraryDays) {
+        const item = day.items.find(i => i.item_id === itemId);
+        if (item) {
+          sourceItem = item;
+          break;
+        }
+      }
+
+      if (!sourceItem) return state;
+
+      // 找到目標 Day
+      const targetDay = state.itineraryDays.find(d => d.day_id === targetDayId);
+      if (!targetDay) return state;
+
+      // 計算新 sequence（放到最後）
+      const prevSeq = targetDay.items[targetDay.items.length - 1]?.sequence || null;
+      const newSequence = calculateNewSequence(prevSeq, null);
+
+      // 建立新項目（複製）
+      const newItem: ItineraryItem = {
+        ...sourceItem,
+        item_id: `item_${Date.now()}`,
+        day_id: targetDayId,
+        sequence: newSequence,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      // 更新行程
+      const updatedDays = state.itineraryDays.map(d => {
+        if (d.day_id === targetDayId) {
+          return { ...d, items: [...d.items, newItem] };
+        }
+        return d;
+      });
+
+      return { itineraryDays: updatedDays };
+    }),
+
+  // 🆕 清空某一天的所有景點
+  clearDay: dayId =>
+    set(state => {
+      // 找到該 Day
+      const dayToClear = state.itineraryDays.find(d => d.day_id === dayId);
+      if (!dayToClear) return state;
+
+      // 將所有項目從收藏池中恢復可拖曳狀態
+      dayToClear.items.forEach(item => {
+        const savedPlace = state.savedPlaces.find(
+          sp => sp.place_id === item.place_id && sp.current_itinerary_item_id === item.item_id
+        );
+        if (savedPlace) {
+          get().updateSavedPlaceStatus(savedPlace.saved_id, false, undefined);
+        }
+      });
+
+      // 清空該天的項目
+      const updatedDays = state.itineraryDays.map(d =>
+        d.day_id === dayId ? { ...d, items: [] } : d
+      );
 
       return { itineraryDays: updatedDays };
     }),

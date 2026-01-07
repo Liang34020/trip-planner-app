@@ -1,6 +1,6 @@
 // src/components/layout/LeftPanel.tsx
 
-import { Search, MapPin, Star, GripVertical } from 'lucide-react';
+import { Search, MapPin, Star } from 'lucide-react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { useAppStore } from '../../store/appStore';
@@ -128,12 +128,6 @@ function PlaceCard({
         isDraggable ? 'cursor-grab active:cursor-grabbing hover:shadow-md' : ''
       } ${isPlaced ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
-      {/* 🆕 拖曳手柄 */}
-      {isDraggable && (
-        <div className="absolute top-2 right-2">
-          <GripVertical className="w-4 h-4 text-gray-400" />
-        </div>
-      )}
 
       {/* 圖片 */}
       {place.photo_url && (
