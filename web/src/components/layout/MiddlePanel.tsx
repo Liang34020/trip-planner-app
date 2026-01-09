@@ -59,8 +59,8 @@ export function MiddlePanel() {
         </div>
       </div>
 
-      {/* 每日行程卡片 - 🆕 整體垂直滾動 */}
-      <div className="flex-1 overflow-y-auto p-4">
+      {/* 每日行程卡片 - ✅ 移除滾動條 */}
+      <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
         <div className="flex gap-4">
           {itineraryDays.map(day => (
             <div key={day.day_id} className="flex-shrink-0 w-64">
@@ -74,7 +74,7 @@ export function MiddlePanel() {
             </div>
           ))}
 
-          {/* 🆕 新增 Day 按鈕 */}
+          {/* 新增 Day 按鈕 */}
           <div className="flex-shrink-0 w-64">
             <AddDayCard />
           </div>
@@ -94,20 +94,23 @@ export function MiddlePanel() {
         />
       )}
 
-      {/* 🆕 編輯 Day 彈窗 */}
+      {/* 編輯 Day 彈窗 */}
       {editingDay && (
         <EditDayModal
           day={editingDay}
           isOpen={!!editingDay}
           onClose={() => setEditingDay(null)}
-          onSave={(notes: string) => {
+          onSave={(notes: string, defaultTransport?: ItineraryDay['default_transport']) => {
             useAppStore.getState().updateDayNotes(editingDay.day_id, notes);
+            if (defaultTransport !== undefined) {
+              useAppStore.getState().updateDayDefaultTransport(editingDay.day_id, defaultTransport);
+            }
             setEditingDay(null);
           }}
         />
       )}
 
-      {/* 🆕 複製景點彈窗 */}
+      {/* 複製景點彈窗 */}
       {copyingItem && (
         <CopyItemModal
           item={copyingItem}
@@ -120,7 +123,8 @@ export function MiddlePanel() {
           }}
         />
       )}
-      {/* 🆕 編輯交通方式彈窗 */}
+
+      {/* 編輯交通方式彈窗 */}
       {editingTransport && (
         <EditTransportModal
           itemId={editingTransport.itemId}
@@ -140,7 +144,7 @@ export function MiddlePanel() {
 }
 
 /**
- * 🆕 可放置的單日行程欄
+ * ✅ 可拖移的單日行程欄
  */
 function DayColumn({
   day,
@@ -156,8 +160,25 @@ function DayColumn({
   onEditTransport: (itemId: string, currentMode?: string) => void;
 }) {
   const { removeDay, clearDay } = useAppStore();
-  const { setNodeRef, isOver } = useDroppable({
+  
+  // ✅ 使用 useSortable 讓整個 Day 可拖移
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setSortableRef,
+    transform,
+    transition,
+    isDragging: isDayDragging,
+  } = useSortable({
     id: day.day_id,
+    data: {
+      type: 'day',
+      day,
+    },
+  });
+
+  const { setNodeRef: setDroppableRef, isOver } = useDroppable({
+    id: `${day.day_id}-droppable`,
     data: {
       type: 'day',
       day,
@@ -166,15 +187,33 @@ function DayColumn({
 
   const itemIds = day.items.map((item: any) => item.item_id);
 
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDayDragging ? 0.5 : 1,
+  };
+
   return (
     <div
-      ref={setNodeRef}
-      className={`bg-white/90 backdrop-blur-sm rounded-xl border shadow-soft transition-all duration-300 flex flex-col animate-fade-in ${
-        isOver ? 'border-primary-400 border-2 ring-4 ring-primary-100 shadow-medium scale-[1.02]' : 'border-gray-200'
-      }`}
+      ref={node => {
+        setSortableRef(node);
+        setDroppableRef(node);
+      }}
+      style={style}
+      className={`bg-white/90 backdrop-blur-sm rounded-xl border transition-all duration-300 flex flex-col animate-fade-in
+        ${isOver 
+          ? 'border-primary-500 border-2 ring-4 ring-primary-200 shadow-lg scale-[1.02]' 
+          : isDayDragging 
+            ? 'border-gray-300 shadow-soft opacity-50'
+            : 'border-gray-200 shadow-soft'
+        }`}
     >
-      {/* 日期標題 */}
-      <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-primary-50/50 to-white group relative">
+      {/* ✅ 日期標題 - 可拖移 */}
+      <div 
+        className="p-4 border-b border-gray-100 bg-gradient-to-r from-primary-50/50 to-white group relative cursor-grab active:cursor-grabbing"
+        {...attributes}
+        {...listeners}
+      >
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 bg-primary-500 rounded-full animate-pulse-soft"></div>
           <h3 className="font-bold text-gray-900">Day {day.day_number}</h3>
@@ -189,7 +228,7 @@ function DayColumn({
           </p>
         )}
 
-        {/* 🆕 Day 操作按鈕 */}
+        {/* Day 操作按鈕 */}
         <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             onClick={() => onEditDay(day)}
@@ -225,9 +264,9 @@ function DayColumn({
         </div>
       </div>
 
-      {/* 🆕 可排序的景點列表 */}
+      {/* ✅ 可排序的景點列表 - 移除滾動條 */}
       <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
-        <div className="flex-1 p-3 space-y-2">
+        <div className="flex-1 p-3 space-y-1 overflow-y-auto scrollbar-hide">
           {day.items.length === 0 ? (
             <div
               className={`text-center py-12 rounded-lg transition-colors ${
@@ -247,9 +286,11 @@ function DayColumn({
                   onEdit={onEditItem}
                   onCopy={onCopyItem}
                 />
+                {/* ✅ 交通連接器：只在不是最後一個景點時顯示 */}
                 {idx < day.items.length - 1 && (
                   <TransportConnector
                     item={item}
+                    dayDefaultTransport={day.default_transport}
                     onEdit={() => onEditTransport(item.item_id, item.transport_to_next)}
                   />
                 )}
@@ -270,7 +311,7 @@ function DayColumn({
 }
 
 /**
- * 🆕 新增 Day 卡片
+ * 新增 Day 卡片
  */
 function AddDayCard() {
   const addNewDay = useAppStore(state => state.addNewDay);
@@ -289,7 +330,7 @@ function AddDayCard() {
 }
 
 /**
- * 🆕 可排序的地點項目
+ * 可排序的地點項目
  */
 function SortablePlaceItem({
   item,
@@ -324,7 +365,6 @@ function SortablePlaceItem({
     opacity: isDragging ? 0.5 : 1,
   };
 
-  // 🆕 鍵盤快捷鍵：Delete 刪除
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (confirm(`確定要刪除「${item.place.name}」嗎？`)) {
@@ -344,7 +384,7 @@ function SortablePlaceItem({
       {...attributes}
       {...listeners}
     >
-      {/* 🆕 操作按鈕組 */}
+      {/* 操作按鈕組 */}
       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={e => {
@@ -389,34 +429,38 @@ function SortablePlaceItem({
         </div>
       )}
 
-      {/* 地點名稱 */}
-      <h4 className="font-medium text-gray-900 text-sm mb-1">
-        {item.place.name}
-      </h4>
-
-      {/* 備註 */}
-      {item.notes && (
-        <p className="text-xs text-gray-600 mt-2 italic">{item.notes}</p>
-      )}
+      {/* ✅ 地點名稱 + 備註（同一行、垂直置中） */}
+      <div className="flex items-center gap-2 mb-1">
+        <h4 className="font-medium text-gray-900 text-sm flex-1">
+          {item.place.name}
+        </h4>
+        {item.notes && (
+          <p className="text-xs text-gray-600 italic flex-shrink-0">💡 {item.notes}</p>
+        )}
+      </div>
     </div>
   );
 }
 
 /**
- * 🆕 交通連接器（Hover 可編輯）
+ * ✅ 交通連接器（獨立卡片、間距縮小）
  */
 function TransportConnector({
   item,
+  dayDefaultTransport,
   onEdit,
 }: {
   item: ItineraryItem;
+  dayDefaultTransport?: string;
   onEdit: () => void;
 }) {
-  const hasTransport = !!item.transport_to_next;
+  // 使用 item 的交通方式，若無則使用 Day 預設
+  const transportMode = item.transport_to_next || dayDefaultTransport;
+  const hasTransport = !!transportMode;
 
   return (
     <div
-      className="group relative flex items-center justify-center py-3 cursor-pointer"
+      className="group relative flex items-center justify-center py-1.5 cursor-pointer"
       onClick={onEdit}
     >
       {/* 連接線 */}
@@ -425,12 +469,12 @@ function TransportConnector({
       </div>
 
       {/* 內容區 */}
-      <div className="relative z-10 flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-lg group-hover:border-primary-400 group-hover:shadow-soft transition-all">
+      <div className="relative z-10 flex items-center gap-2 px-3 py-1 bg-white border border-gray-200 rounded-lg group-hover:border-primary-400 group-hover:shadow-soft transition-all">
         {hasTransport ? (
           <>
             <Navigation className="w-3 h-3 text-gray-500 group-hover:text-primary-600 transition-colors" />
             <span className="text-xs text-gray-600 group-hover:text-primary-700 font-medium">
-              {getTransportLabel(item.transport_to_next)}
+              {getTransportLabel(transportMode as ItineraryItem['transport_to_next'])}
             </span>
             {item.transport_duration_minutes && (
               <span className="text-xs text-gray-400">

@@ -51,6 +51,7 @@ export interface Trip {
 
 /**
  * 每日行程（對應 itinerary_days 表）
+ * ✅ 新增 default_transport - 預設交通方式
  */
 export interface ItineraryDay {
   day_id: string;
@@ -58,6 +59,7 @@ export interface ItineraryDay {
   day_number: number;
   date?: string;
   notes?: string;
+  default_transport?: 'walk' | 'subway' | 'taxi' | 'drive' | 'bus'; // 🆕 預設交通方式
   items: ItineraryItem[]; // 該日的所有景點
 }
 

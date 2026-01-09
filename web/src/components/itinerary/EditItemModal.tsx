@@ -1,9 +1,8 @@
 // src/components/itinerary/EditItemModal.tsx
 
-import { X, Clock, MessageSquare, Navigation } from 'lucide-react';
+import { X, Clock, MessageSquare } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import type { ItineraryItem } from '../../types/models';
-import { TRANSPORT_LABELS } from '../../types/models';
 import { isValidDuration } from '../../utils/validation';
 import { showToast } from '../../utils/toast';
 
@@ -25,22 +24,18 @@ export function EditItemModal({
     item.duration_minutes?.toString() || ''
   );
   const [notes, setNotes] = useState(item.notes || '');
-  const [transportToNext, setTransportToNext] = useState(
-    item.transport_to_next || ''
-  );
 
   // 當 item 改變時重置表單
   useEffect(() => {
     setScheduledTime(item.scheduled_time || '');
     setDurationMinutes(item.duration_minutes?.toString() || '');
     setNotes(item.notes || '');
-    setTransportToNext(item.transport_to_next || '');
   }, [item]);
 
   if (!isOpen) return null;
 
   function handleSave() {
-    // 🆕 驗證停留時間
+    // 驗證停留時間
     const duration = durationMinutes ? parseInt(durationMinutes) : undefined;
     if (duration !== undefined && !isValidDuration(duration)) {
       showToast.error('停留時間必須在 1-1440 分鐘之間');
@@ -51,7 +46,6 @@ export function EditItemModal({
       scheduled_time: scheduledTime || undefined,
       duration_minutes: duration,
       notes: notes || undefined,
-      transport_to_next: (transportToNext as ItineraryItem['transport_to_next']) || undefined,
     });
     onClose();
   }
@@ -113,26 +107,6 @@ export function EditItemModal({
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             />
             <p className="text-xs text-gray-500 mt-1">範圍：1-1440 分鐘（最多 24 小時）</p>
-          </div>
-
-          {/* 交通方式 */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              <Navigation className="w-4 h-4 inline mr-1" />
-              到下一個點的交通方式
-            </label>
-            <select
-              value={transportToNext}
-              onChange={e => setTransportToNext(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-            >
-              <option value="">-- 未設定 --</option>
-              {Object.entries(TRANSPORT_LABELS).map(([key, label]) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
-            </select>
           </div>
 
           {/* 備註 */}

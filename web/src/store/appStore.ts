@@ -28,7 +28,7 @@ interface AppState {
     itemId?: string
   ) => void;
 
-  // 🆕 拖曳相關方法
+  // 拖曳相關方法
   addItemToDay: (
     placeId: string,
     savedId: string,
@@ -39,12 +39,14 @@ interface AppState {
   removeItemFromDay: (itemId: string) => void;
   updateItineraryItem: (itemId: string, updates: Partial<ItineraryItem>) => void;
 
-  // 🆕 Day 管理方法
+  // Day 管理方法
   addNewDay: () => void;
   removeDay: (dayId: string) => void;
   updateDayNotes: (dayId: string, notes: string) => void;
+  updateDayDefaultTransport: (dayId: string, transport?: ItineraryDay['default_transport']) => void;
+  reorderDays: (oldIndex: number, newIndex: number) => void; // ✅ 新增 Day 排序
 
-  // 🆕 進階操作
+  // 進階操作
   copyItemToDay: (itemId: string, targetDayId: string) => void;
   clearDay: (dayId: string) => void;
 }
@@ -78,7 +80,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ),
     })),
 
-  // 🆕 從收藏池拖曳地點到行程
+  // 從收藏池拖曳地點到行程
   addItemToDay: (placeId, savedId, dayId, dropIndex) =>
     set(state => {
       try {
@@ -99,13 +101,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         const nextSeq = day.items[dropIndex]?.sequence || null;
         const newSequence = calculateNewSequence(prevSeq, nextSeq);
 
-        // 建立新項目
+        // ✅ 建立新項目（繼承 Day 預設交通方式）
         const newItem: ItineraryItem = {
           item_id: `item_${Date.now()}`,
           day_id: dayId,
           place_id: placeId,
           place,
           sequence: newSequence,
+          transport_to_next: day.default_transport, // ✅ 使用 Day 預設交通方式
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
@@ -133,29 +136,48 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }),
 
-  // 🆕 在同一天或跨天重新排序
+  // ✅ 在同一天或跨天重新排序（交通方式不跟著移動）
   reorderItemInDay: (itemId, targetDayId, dropIndex) =>
     set(state => {
       // 找到原始項目
       let sourceItem: ItineraryItem | null = null;
       let sourceDayId: string | null = null;
+      let sourceIndex: number = -1;
 
       for (const day of state.itineraryDays) {
-        const item = day.items.find(i => i.item_id === itemId);
-        if (item) {
-          sourceItem = item;
+        const index = day.items.findIndex(i => i.item_id === itemId);
+        if (index !== -1) {
+          sourceItem = day.items[index];
           sourceDayId = day.day_id;
+          sourceIndex = index;
           break;
         }
       }
 
       if (!sourceItem || !sourceDayId) return state;
 
+      // ✅ 保存原位置的交通方式（要轉移給前一個景點）
+      const transportToTransfer = sourceItem.transport_to_next;
+
       // 從原位置移除
-      const daysAfterRemove = state.itineraryDays.map(d => ({
-        ...d,
-        items: d.items.filter(i => i.item_id !== itemId),
-      }));
+      const daysAfterRemove = state.itineraryDays.map(d => {
+        if (d.day_id === sourceDayId) {
+          const items = d.items.filter(i => i.item_id !== itemId);
+          
+          // ✅ 如果被移除的景點有交通方式，轉移給前一個景點
+          if (transportToTransfer && sourceIndex > 0 && items.length > 0) {
+            const prevIndex = Math.min(sourceIndex - 1, items.length - 1);
+            items[prevIndex] = {
+              ...items[prevIndex],
+              transport_to_next: transportToTransfer,
+              updated_at: new Date().toISOString(),
+            };
+          }
+          
+          return { ...d, items };
+        }
+        return d;
+      });
 
       // 找到目標 Day
       const targetDay = daysAfterRemove.find(d => d.day_id === targetDayId);
@@ -166,11 +188,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       const nextSeq = targetDay.items[dropIndex]?.sequence || null;
       const newSequence = calculateNewSequence(prevSeq, nextSeq);
 
-      // 更新項目並插入新位置
+      // ✅ 更新項目（清除交通方式，因為交通方式留在原位）
       const updatedItem = {
         ...sourceItem,
         day_id: targetDayId,
         sequence: newSequence,
+        transport_to_next: undefined, // ✅ 清除交通方式
         updated_at: new Date().toISOString(),
       };
 
@@ -186,7 +209,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { itineraryDays: updatedDays };
     }),
 
-  // 🆕 從行程中刪除項目
+  // 從行程中刪除項目
   removeItemFromDay: itemId =>
     set(state => {
       try {
@@ -229,7 +252,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }),
 
-  // 🆕 更新行程項目資訊
+  // 更新行程項目資訊
   updateItineraryItem: (itemId, updates) =>
     set(state => {
       const updatedDays = state.itineraryDays.map(day => ({
@@ -244,7 +267,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { itineraryDays: updatedDays };
     }),
 
-  // 🆕 新增一天行程
+  // 新增一天行程
   addNewDay: () =>
     set(state => {
       try {
@@ -281,7 +304,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }),
 
-  // 🆕 刪除一天行程
+  // 刪除一天行程
   removeDay: dayId =>
     set(state => {
       // 找到要刪除的 Day 中的所有項目
@@ -304,7 +327,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         .map((day, index) => {
           const newDayNumber = index + 1;
           
-          // 🆕 重新計算日期（基於 trip 的 start_date）
+          // 重新計算日期（基於 trip 的 start_date）
           let newDate: string | undefined;
           if (state.currentTrip?.start_date) {
             const startDate = new Date(state.currentTrip.start_date);
@@ -322,7 +345,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { itineraryDays: updatedDays };
     }),
 
-  // 🆕 更新當日備註
+  // 更新當日備註
   updateDayNotes: (dayId, notes) =>
     set(state => {
       const updatedDays = state.itineraryDays.map(day =>
@@ -332,7 +355,66 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { itineraryDays: updatedDays };
     }),
 
-  // 🆕 複製景點到其他 Day
+  // ✅ 更新 Day 預設交通方式
+  updateDayDefaultTransport: (dayId, transport) =>
+    set(state => {
+      try {
+        const updatedDays = state.itineraryDays.map(day =>
+          day.day_id === dayId ? { ...day, default_transport: transport } : day
+        );
+
+        if (transport) {
+          showToast.success(`已設定預設交通方式`);
+        } else {
+          showToast.success(`已移除預設交通方式`);
+        }
+
+        return { itineraryDays: updatedDays };
+      } catch (error) {
+        console.error('updateDayDefaultTransport error:', error);
+        showToast.error('設定失敗，請重試');
+        return state;
+      }
+    }),
+
+  // ✅ 重新排序 Day（整天拖移）
+  reorderDays: (oldIndex, newIndex) =>
+    set(state => {
+      try {
+        const newDays = [...state.itineraryDays];
+        const [movedDay] = newDays.splice(oldIndex, 1);
+        newDays.splice(newIndex, 0, movedDay);
+
+        // 重新編號並更新日期
+        const updatedDays = newDays.map((day, index) => {
+          const newDayNumber = index + 1;
+          
+          // 重新計算日期（基於 trip 的 start_date）
+          let newDate: string | undefined;
+          if (state.currentTrip?.start_date) {
+            const startDate = new Date(state.currentTrip.start_date);
+            startDate.setDate(startDate.getDate() + index);
+            newDate = startDate.toISOString().split('T')[0];
+          }
+
+          return {
+            ...day,
+            day_number: newDayNumber,
+            date: newDate,
+          };
+        });
+
+        showToast.success(`已移動 Day ${oldIndex + 1} 到 Day ${newIndex + 1}`);
+
+        return { itineraryDays: updatedDays };
+      } catch (error) {
+        console.error('reorderDays error:', error);
+        showToast.error('移動失敗，請重試');
+        return state;
+      }
+    }),
+
+  // 複製景點到其他 Day
   copyItemToDay: (itemId, targetDayId) =>
     set(state => {
       try {
@@ -390,7 +472,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }),
 
-  // 🆕 清空某一天的所有景點
+  // 清空某一天的所有景點
   clearDay: dayId =>
     set(state => {
       try {

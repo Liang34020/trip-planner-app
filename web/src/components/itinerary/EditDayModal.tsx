@@ -1,27 +1,30 @@
 // src/components/itinerary/EditDayModal.tsx
 
-import { X, MessageSquare } from 'lucide-react';
+import { X, MessageSquare, Navigation } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import type { ItineraryDay } from '../../types/models';
+import { TRANSPORT_LABELS } from '../../types/models';
 
 interface EditDayModalProps {
   day: ItineraryDay;
   isOpen: boolean;
   onClose: () => void;
-  onSave: (notes: string) => void;
+  onSave: (notes: string, defaultTransport?: ItineraryDay['default_transport']) => void;
 }
 
 export function EditDayModal({ day, isOpen, onClose, onSave }: EditDayModalProps) {
   const [notes, setNotes] = useState(day.notes || '');
+  const [defaultTransport, setDefaultTransport] = useState(day.default_transport || '');
 
   useEffect(() => {
     setNotes(day.notes || '');
+    setDefaultTransport(day.default_transport || '');
   }, [day]);
 
   if (!isOpen) return null;
 
   function handleSave() {
-    onSave(notes);
+    onSave(notes, defaultTransport as ItineraryDay['default_transport']);
     onClose();
   }
 
@@ -59,6 +62,29 @@ export function EditDayModal({ day, isOpen, onClose, onSave }: EditDayModalProps
               </div>
             </div>
           )}
+
+          {/* ✅ 預設交通方式 */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              <Navigation className="w-4 h-4 inline mr-1" />
+              預設交通方式
+            </label>
+            <select
+              value={defaultTransport}
+              onChange={e => setDefaultTransport(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            >
+              <option value="">-- 未設定 --</option>
+              {Object.entries(TRANSPORT_LABELS).map(([key, label]) => (
+                <option key={key} value={key}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              新加入的景點將自動使用此交通方式
+            </p>
+          </div>
 
           {/* 當日備註 */}
           <div>
