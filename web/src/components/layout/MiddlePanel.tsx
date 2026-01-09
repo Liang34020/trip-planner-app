@@ -1,6 +1,6 @@
 // src/components/layout/MiddlePanel.tsx
 
-import { Calendar, Clock, MapPin, ArrowRight, Trash2, Edit2, Plus, Copy, Trash } from 'lucide-react';
+import { Calendar, Clock, MapPin, ArrowRight, Trash2, Edit2, Plus, Copy, Trash, Navigation } from 'lucide-react';
 import { useDroppable } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -15,12 +15,17 @@ import type { ItineraryItem, ItineraryDay } from '../../types/models';
 import { EditItemModal } from '../itinerary/EditItemModal';
 import { EditDayModal } from '../itinerary/EditDayModal';
 import { CopyItemModal } from '../itinerary/CopyItemModal';
+import { EditTransportModal } from '../itinerary/EditTransportModal';
 
 export function MiddlePanel() {
   const { currentTrip, itineraryDays } = useAppStore();
   const [editingItem, setEditingItem] = useState<ItineraryItem | null>(null);
   const [editingDay, setEditingDay] = useState<ItineraryDay | null>(null);
   const [copyingItem, setCopyingItem] = useState<ItineraryItem | null>(null);
+  const [editingTransport, setEditingTransport] = useState<{
+    itemId: string;
+    currentMode?: string;
+  } | null>(null);
 
   if (!currentTrip) {
     return (
@@ -64,6 +69,7 @@ export function MiddlePanel() {
                 onEditItem={setEditingItem}
                 onEditDay={setEditingDay}
                 onCopyItem={setCopyingItem}
+                onEditTransport={(itemId, currentMode) => setEditingTransport({ itemId, currentMode })}
               />
             </div>
           ))}
@@ -114,6 +120,21 @@ export function MiddlePanel() {
           }}
         />
       )}
+      {/* 🆕 編輯交通方式彈窗 */}
+      {editingTransport && (
+        <EditTransportModal
+          itemId={editingTransport.itemId}
+          currentMode={editingTransport.currentMode}
+          isOpen={!!editingTransport}
+          onClose={() => setEditingTransport(null)}
+          onSave={(mode: string) => {
+            useAppStore.getState().updateItineraryItem(editingTransport.itemId, {
+              transport_to_next: mode as ItineraryItem['transport_to_next'],
+            });
+            setEditingTransport(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -126,11 +147,13 @@ function DayColumn({
   onEditItem,
   onEditDay,
   onCopyItem,
+  onEditTransport,
 }: {
   day: any;
   onEditItem: (item: ItineraryItem) => void;
   onEditDay: (day: ItineraryDay) => void;
   onCopyItem: (item: ItineraryItem) => void;
+  onEditTransport: (itemId: string, currentMode?: string) => void;
 }) {
   const { removeDay, clearDay } = useAppStore();
   const { setNodeRef, isOver } = useDroppable({
@@ -224,10 +247,10 @@ function DayColumn({
                   onEdit={onEditItem}
                   onCopy={onCopyItem}
                 />
-                {idx < day.items.length - 1 && item.transport_to_next && (
-                  <TransportIndicator
-                    mode={item.transport_to_next}
-                    duration={item.transport_duration_minutes}
+                {idx < day.items.length - 1 && (
+                  <TransportConnector
+                    item={item}
+                    onEdit={() => onEditTransport(item.item_id, item.transport_to_next)}
                   />
                 )}
               </div>
@@ -317,7 +340,6 @@ function SortablePlaceItem({
       className={`bg-white border rounded-xl p-3 transition-all duration-300 cursor-grab active:cursor-grabbing relative group ${
         isOver ? 'border-primary-400 border-2 bg-primary-50 shadow-medium scale-[1.02]' : 'border-gray-200 hover:border-primary-300 hover:shadow-soft'
       } ${isDragging ? 'opacity-50 scale-95' : ''}`}
-      // tabIndex={0} 可省略 內建已經有了 
       onKeyDown={handleKeyDown}
       {...attributes}
       {...listeners}
@@ -381,22 +403,50 @@ function SortablePlaceItem({
 }
 
 /**
- * 交通方式指示器
+ * 🆕 交通連接器（Hover 可編輯）
  */
-function TransportIndicator({
-  mode,
-  duration,
+function TransportConnector({
+  item,
+  onEdit,
 }: {
-  mode: string;
-  duration?: number;
+  item: ItineraryItem;
+  onEdit: () => void;
 }) {
+  const hasTransport = !!item.transport_to_next;
+
   return (
-    <div className="flex items-center justify-center gap-2 py-2 text-xs text-gray-500">
-      <ArrowRight className="w-3 h-3" />
-      <span>
-        {getTransportLabel(mode as ItineraryItem['transport_to_next'])}
-        {duration && ` (${duration} 分鐘)`}
-      </span>
+    <div
+      className="group relative flex items-center justify-center py-3 cursor-pointer"
+      onClick={onEdit}
+    >
+      {/* 連接線 */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="w-px h-full bg-gray-200 group-hover:bg-primary-300 transition-colors"></div>
+      </div>
+
+      {/* 內容區 */}
+      <div className="relative z-10 flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-200 rounded-lg group-hover:border-primary-400 group-hover:shadow-soft transition-all">
+        {hasTransport ? (
+          <>
+            <Navigation className="w-3 h-3 text-gray-500 group-hover:text-primary-600 transition-colors" />
+            <span className="text-xs text-gray-600 group-hover:text-primary-700 font-medium">
+              {getTransportLabel(item.transport_to_next)}
+            </span>
+            {item.transport_duration_minutes && (
+              <span className="text-xs text-gray-400">
+                ({item.transport_duration_minutes} 分鐘)
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            <Plus className="w-3 h-3 text-gray-400 group-hover:text-primary-600 transition-colors" />
+            <span className="text-xs text-gray-400 group-hover:text-primary-700 font-medium">
+              點擊設定交通方式
+            </span>
+          </>
+        )}
+      </div>
     </div>
   );
 }
