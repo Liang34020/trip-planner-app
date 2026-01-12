@@ -55,14 +55,11 @@ export function AppLayout() {
 
     setActiveId(active.id as string);
 
-    // ✅ 禁止所有滾動
-    
-    document.body.style.overflow = 'hidden';
-    // 禁止內部元素滾動
-    const scrollableElements = document.querySelectorAll('.overflow-y-auto, .overflow-x-auto, .overflow-auto');
-    scrollableElements.forEach(el => {
-      (el as HTMLElement).style.overflow = 'hidden';
-    });
+    // ✅ 只禁止收藏池滾動，保留行程列表水平滾動
+    const leftPanel = document.querySelector('.left-panel-scroll');
+    if (leftPanel) {
+      (leftPanel as HTMLElement).style.overflow = 'hidden';
+    }
 
     if (activeData?.type === 'place') {
       setActiveType('place');
@@ -84,12 +81,11 @@ export function AppLayout() {
     setActiveSavedPlace(null);
     setActiveItem(null);
     
-    // ✅ 恢復所有滾動
-    document.body.style.overflow = '';
-    const scrollableElements = document.querySelectorAll('.overflow-y-auto, .overflow-x-auto, .overflow-auto');
-    scrollableElements.forEach(el => {
-      (el as HTMLElement).style.overflow = '';
-    });
+    // ✅ 恢復收藏池滾動
+    const leftPanel = document.querySelector('.left-panel-scroll');
+    if (leftPanel) {
+      (leftPanel as HTMLElement).style.overflow = '';
+    }
   }
 
   /**
@@ -125,6 +121,13 @@ export function AppLayout() {
     // Case 1: 從收藏池拖曳地點
     if (activeData?.type === 'place') {
       const { savedPlace } = activeData;
+      
+      // ✅ 如果沒有 over 或 overData，表示放回收藏池
+      if (!overData || overData.type === 'place') {
+        console.log('✅ 地點放回收藏池');
+        return;
+      }
+      
       let targetDayId: string;
       let dropIndex: number;
 
@@ -209,12 +212,11 @@ export function AppLayout() {
     setActiveSavedPlace(null);
     setActiveItem(null);
     
-    // ✅ 恢復所有滾動
-    document.body.style.overflow = '';
-    const scrollableElements = document.querySelectorAll('.overflow-y-auto, .overflow-x-auto, .overflow-auto');
-    scrollableElements.forEach(el => {
-      (el as HTMLElement).style.overflow = '';
-    });
+    // ✅ 恢復收藏池滾動
+    const leftPanel = document.querySelector('.left-panel-scroll');
+    if (leftPanel) {
+      (leftPanel as HTMLElement).style.overflow = '';
+    }
   }
 
   return (

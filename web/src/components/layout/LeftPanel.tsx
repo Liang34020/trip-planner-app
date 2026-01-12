@@ -36,8 +36,8 @@ export function LeftPanel() {
         </div>
       </div>
 
-      {/* 地點列表 - ✅ 移除滾動條 */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-hide">
+      {/* 地點列表 - ✅ 加入識別 class */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-hide left-panel-scroll">
         {/* 可用地點 */}
         {availablePlaces.length > 0 && (
           <div>

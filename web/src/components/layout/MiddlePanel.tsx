@@ -169,6 +169,7 @@ function DayColumn({
     transform,
     transition,
     isDragging: isDayDragging,
+    isOver: isDayOver, // ✅ Day 是否是拖曳目標
   } = useSortable({
     id: day.day_id,
     data: {
@@ -200,12 +201,14 @@ function DayColumn({
         setDroppableRef(node);
       }}
       style={style}
-      className={`bg-white/90 backdrop-blur-sm rounded-xl border transition-all duration-300 flex flex-col animate-fade-in
-        ${isOver 
+      className={`bg-white/90 backdrop-blur-sm rounded-xl overflow-hidden border transition-all duration-200 flex flex-col animate-fade-in
+        ${isDayOver 
           ? 'border-primary-500 border-2 ring-4 ring-primary-200 shadow-lg scale-[1.02]' 
           : isDayDragging 
             ? 'border-gray-300 shadow-soft opacity-50'
-            : 'border-gray-200 shadow-soft'
+            : isOver
+              ? 'border-primary-400 border-2 ring-4 ring-primary-100 shadow-medium scale-[1.02]'
+              : 'border-gray-200 shadow-soft'
         }`}
     >
       {/* ✅ 日期標題 - 可拖移 */}
@@ -362,7 +365,6 @@ function SortablePlaceItem({
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : 1,
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -377,9 +379,9 @@ function SortablePlaceItem({
     <div
       ref={setNodeRef}
       style={style}
-      className={`bg-white border rounded-xl p-3 transition-all duration-300 cursor-grab active:cursor-grabbing relative group ${
-        isOver ? 'border-primary-400 border-2 bg-primary-50 shadow-medium scale-[1.02]' : 'border-gray-200 hover:border-primary-300 hover:shadow-soft'
-      } ${isDragging ? 'opacity-50 scale-95' : ''}`}
+      className={`bg-white border rounded-xl p-3 transition-all duration-200 cursor-grab active:cursor-grabbing relative group border-gray-200 hover:border-primary-300 hover:shadow-soft
+        ${isDragging ? 'opacity-0' : ''}
+      `}
       onKeyDown={handleKeyDown}
       {...attributes}
       {...listeners}
