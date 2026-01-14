@@ -1,0 +1,31 @@
+# FastAPI 核心
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# 資料庫
+asyncpg==0.29.0
+sqlalchemy==2.0.25
+psycopg2-binary==2.9.9
+
+# Redis
+redis==5.0.1
+
+# 認證與安全
+python-jose[cryptography]==3.3.0
+bcrypt==4.0.1
+passlib[bcrypt]
+# passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# 工具
+python-dotenv==1.0.0
+email-validator==2.1.0.post1
+
+# HTTP 請求 (Google Maps API)
+httpx==0.26.0
+
+# 開發工具
+pytest==7.4.4
+pytest-asyncio==0.23.3

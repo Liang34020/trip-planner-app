@@ -1,0 +1,127 @@
+# version: '3.8'
+
+services:
+  # PostgreSQL 資料庫
+  postgres:
+    image: postgres:15-alpine
+    container_name: trip_planner_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trip_admin
+      POSTGRES_PASSWORD: trip_password_2025
+      POSTGRES_DB: trip_planner
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./backend/database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+    networks:
+      - trip_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trip_admin -d trip_planner"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis (用於快取和 Session)
+  redis:
+    image: redis:7-alpine
+    container_name: trip_planner_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - trip_network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # FastAPI 後端
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: trip_planner_api
+    restart: unless-stopped
+    environment:
+      # 基本設定
+      APP_NAME: Trip Planner API
+      ENVIRONMENT: development
+      DEBUG: "True"
+      
+      # 資料庫配置
+      DATABASE_URL: postgresql+asyncpg://trip_admin:trip_password_2025@postgres:5432/trip_planner
+      
+      # Redis 配置
+      REDIS_URL: redis://redis:6379/0
+      REDIS_CACHE_TTL: "86400"
+      
+      # JWT 配置
+      SECRET_KEY: f66ea43e44cfa15784f703e52c6e5d1fe6f2f1300e8e7baa8235f34635a0bfe6
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: "15"
+      REFRESH_TOKEN_EXPIRE_DAYS: "7"
+      
+      # Google Maps API (之後加入)
+      GOOGLE_MAPS_API_KEY: ""
+      
+      # ✅ CORS 設定（使用逗號分隔）
+      CORS_ORIGINS: '["http://localhost:5173","http://localhost:3000"]'
+      
+      # 分頁設定
+      DEFAULT_PAGE_SIZE: "20"
+      MAX_PAGE_SIZE: "100"
+      
+      # Fractional Indexing
+      SEQUENCE_PRECISION: "10"
+      SEQUENCE_REBALANCE_THRESHOLD: "0.000001"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+    networks:
+      - trip_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # pgAdmin (資料庫管理介面，可選)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: trip_planner_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@tripplanner.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - trip_network
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  trip_network:
+    driver: bridge
