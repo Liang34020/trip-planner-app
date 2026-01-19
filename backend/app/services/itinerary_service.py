@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from fastapi import HTTPException, status
 from typing import Optional
 from decimal import Decimal
@@ -21,7 +21,6 @@ class ItineraryService:
         result = await self.db.execute(
             select(ItineraryDay).where(ItineraryDay.day_id == day_id)
         )
-        # day = result.scalar_one_or_none()
         day = result.unique().scalar_one_or_none()
         
         if not day:
@@ -37,7 +36,7 @@ class ItineraryService:
                 Trip.user_id == user_id
             )
         )
-        trip = trip_result.unique().scalar_one_or_none()  # 加入 .unique()
+        trip = trip_result.unique().scalar_one_or_none()
         
         if not trip:
             raise HTTPException(
@@ -192,7 +191,7 @@ class ItineraryService:
         
         place_id = str(item.place_id)
         
-        # 更新收藏池狀態
+        # ✅ 修復：先更新收藏池狀態
         await self._update_saved_place_status(
             user_id=user_id,
             place_id=place_id,
@@ -200,8 +199,10 @@ class ItineraryService:
             item_id=None
         )
         
-        # 刪除景點
-        await self.db.delete(item)
+        # ✅ 修復：使用 SQLAlchemy 2.0 的正確刪除方式
+        await self.db.execute(
+            delete(ItineraryItem).where(ItineraryItem.item_id == item_id)
+        )
         await self.db.commit()
     
     async def _update_saved_place_status(
