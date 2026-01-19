@@ -1,6 +1,17 @@
 // src/components/layout/MiddlePanel.tsx
 
-import { Calendar, Clock, MapPin, ArrowRight, Trash2, Edit2, Plus, Copy, Trash, Navigation } from 'lucide-react';
+import {
+  Calendar,
+  Clock,
+  MapPin,
+  ArrowRight,
+  Trash2,
+  Edit2,
+  Plus,
+  Copy,
+  Trash,
+  Navigation,
+} from 'lucide-react';
 import { useDroppable } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -18,7 +29,10 @@ import { CopyItemModal } from '../itinerary/CopyItemModal';
 import { EditTransportModal } from '../itinerary/EditTransportModal';
 
 export function MiddlePanel() {
-  const { currentTrip, itineraryDays } = useAppStore();
+  // ✅ 修復 1: 使用 selector 而非解構，確保響應式更新
+  const currentTrip = useAppStore(state => state.currentTrip);
+  const itineraryDays = useAppStore(state => state.itineraryDays);
+
   const [editingItem, setEditingItem] = useState<ItineraryItem | null>(null);
   const [editingDay, setEditingDay] = useState<ItineraryDay | null>(null);
   const [copyingItem, setCopyingItem] = useState<ItineraryItem | null>(null);
@@ -33,7 +47,9 @@ export function MiddlePanel() {
         <div className="empty-state animate-scale-in">
           <Calendar className="empty-state-icon animate-pulse-soft" />
           <h3 className="empty-state-title">尚未選擇行程</h3>
-          <p className="empty-state-description">建立或選擇一個旅遊專案開始規劃</p>
+          <p className="empty-state-description">
+            建立或選擇一個旅遊專案開始規劃
+          </p>
           <button className="btn btn-primary">+ 建立新行程</button>
         </div>
       </div>
@@ -59,17 +75,19 @@ export function MiddlePanel() {
         </div>
       </div>
 
-      {/* 每日行程卡片 - ✅ 移除滾動條 */}
+      {/* 每日行程卡片 */}
       <div className="flex-1 overflow-y-auto p-4 scrollbar-hide">
         <div className="flex gap-4">
-          {itineraryDays.map(day => (
+          {itineraryDays.map((day: ItineraryDay) => (
             <div key={day.day_id} className="flex-shrink-0 w-64">
               <DayColumn
                 day={day}
                 onEditItem={setEditingItem}
                 onEditDay={setEditingDay}
                 onCopyItem={setCopyingItem}
-                onEditTransport={(itemId, currentMode) => setEditingTransport({ itemId, currentMode })}
+                onEditTransport={(itemId, currentMode) =>
+                  setEditingTransport({ itemId, currentMode })
+                }
               />
             </div>
           ))}
@@ -88,7 +106,9 @@ export function MiddlePanel() {
           isOpen={!!editingItem}
           onClose={() => setEditingItem(null)}
           onSave={(updates: Partial<ItineraryItem>) => {
-            useAppStore.getState().updateItineraryItem(editingItem.item_id, updates);
+            useAppStore
+              .getState()
+              .updateItineraryItem(editingItem.item_id, updates);
             setEditingItem(null);
           }}
         />
@@ -100,10 +120,15 @@ export function MiddlePanel() {
           day={editingDay}
           isOpen={!!editingDay}
           onClose={() => setEditingDay(null)}
-          onSave={(notes: string, defaultTransport?: ItineraryDay['default_transport']) => {
+          onSave={(
+            notes: string,
+            defaultTransport?: ItineraryDay['default_transport']
+          ) => {
             useAppStore.getState().updateDayNotes(editingDay.day_id, notes);
             if (defaultTransport !== undefined) {
-              useAppStore.getState().updateDayDefaultTransport(editingDay.day_id, defaultTransport);
+              useAppStore
+                .getState()
+                .updateDayDefaultTransport(editingDay.day_id, defaultTransport);
             }
             setEditingDay(null);
           }}
@@ -118,7 +143,9 @@ export function MiddlePanel() {
           isOpen={!!copyingItem}
           onClose={() => setCopyingItem(null)}
           onCopy={(targetDayId: string) => {
-            useAppStore.getState().copyItemToDay(copyingItem.item_id, targetDayId);
+            useAppStore
+              .getState()
+              .copyItemToDay(copyingItem.item_id, targetDayId);
             setCopyingItem(null);
           }}
         />
@@ -132,9 +159,11 @@ export function MiddlePanel() {
           isOpen={!!editingTransport}
           onClose={() => setEditingTransport(null)}
           onSave={(mode: string) => {
-            useAppStore.getState().updateItineraryItem(editingTransport.itemId, {
-              transport_to_next: mode as ItineraryItem['transport_to_next'],
-            });
+            useAppStore
+              .getState()
+              .updateItineraryItem(editingTransport.itemId, {
+                transport_to_next: mode as ItineraryItem['transport_to_next'],
+              });
             setEditingTransport(null);
           }}
         />
@@ -144,7 +173,7 @@ export function MiddlePanel() {
 }
 
 /**
- * ✅ 可拖移的單日行程欄
+ * ✅ 單日行程欄 - 修復拖曳目標配置
  */
 function DayColumn({
   day,
@@ -160,63 +189,32 @@ function DayColumn({
   onEditTransport: (itemId: string, currentMode?: string) => void;
 }) {
   const { removeDay, clearDay } = useAppStore();
-  
-  // ✅ 使用 useSortable 讓整個 Day 可拖移
-  const {
-    attributes,
-    listeners,
-    setNodeRef: setSortableRef,
-    transform,
-    transition,
-    isDragging: isDayDragging,
-    isOver: isDayOver, // ✅ Day 是否是拖曳目標
-  } = useSortable({
-    id: day.day_id,
-    data: {
-      type: 'day',
-      day,
-    },
-  });
 
-  const { setNodeRef: setDroppableRef, isOver } = useDroppable({
+  // ✅ 修復 2: 移除 useSortable，只保留 useDroppable
+  // Day 之間的拖曳排序目前未實作，避免 ref 衝突
+  const { setNodeRef, isOver } = useDroppable({
     id: `${day.day_id}-droppable`,
     data: {
-      type: 'day',
+      type: 'day-droppable', // ✅ 修復 3: 統一 type 名稱
+      dayId: day.day_id, // ✅ 修復 4: 加入 dayId
       day,
     },
   });
 
   const itemIds = day.items.map((item: any) => item.item_id);
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDayDragging ? 0.5 : 1,
-  };
-
   return (
     <div
-      ref={node => {
-        setSortableRef(node);
-        setDroppableRef(node);
-      }}
-      style={style}
+      ref={setNodeRef}
       className={`bg-white/90 backdrop-blur-sm rounded-xl overflow-hidden border transition-all duration-200 flex flex-col animate-fade-in
-        ${isDayOver 
-          ? 'border-primary-500 border-2 ring-4 ring-primary-200 shadow-lg scale-[1.02]' 
-          : isDayDragging 
-            ? 'border-gray-300 shadow-soft opacity-50'
-            : isOver
-              ? 'border-primary-400 border-2 ring-4 ring-primary-100 shadow-medium scale-[1.02]'
-              : 'border-gray-200 shadow-soft'
+        ${
+          isOver
+            ? 'border-primary-400 border-2 ring-4 ring-primary-100 shadow-medium scale-[1.02]'
+            : 'border-gray-200 shadow-soft'
         }`}
     >
-      {/* ✅ 日期標題 - 可拖移 */}
-      <div 
-        className="p-4 border-b border-gray-100 bg-gradient-to-r from-primary-50/50 to-white group relative cursor-grab active:cursor-grabbing"
-        {...attributes}
-        {...listeners}
-      >
+      {/* 日期標題 */}
+      <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-primary-50/50 to-white group relative">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 bg-primary-500 rounded-full animate-pulse-soft"></div>
           <h3 className="font-bold text-gray-900">Day {day.day_number}</h3>
@@ -243,7 +241,9 @@ function DayColumn({
           {day.items.length > 0 && (
             <button
               onClick={() => {
-                if (confirm(`確定要清空 Day ${day.day_number} 的所有景點嗎？`)) {
+                if (
+                  confirm(`確定要清空 Day ${day.day_number} 的所有景點嗎？`)
+                ) {
                   clearDay(day.day_id);
                 }
               }}
@@ -255,7 +255,11 @@ function DayColumn({
           )}
           <button
             onClick={() => {
-              if (confirm(`確定要刪除 Day ${day.day_number} 嗎？\n此天的所有景點將被移除。`)) {
+              if (
+                confirm(
+                  `確定要刪除 Day ${day.day_number} 嗎？\n此天的所有景點將被移除。`
+                )
+              ) {
                 removeDay(day.day_id);
               }
             }}
@@ -267,7 +271,7 @@ function DayColumn({
         </div>
       </div>
 
-      {/* ✅ 可排序的景點列表 - 移除滾動條 */}
+      {/* 可排序的景點列表 */}
       <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
         <div className="flex-1 p-3 space-y-1 overflow-y-auto scrollbar-hide">
           {day.items.length === 0 ? (
@@ -286,15 +290,19 @@ function DayColumn({
               <div key={item.item_id}>
                 <SortablePlaceItem
                   item={item}
+                  dayId={day.day_id}
+                  index={idx}
                   onEdit={onEditItem}
                   onCopy={onCopyItem}
                 />
-                {/* ✅ 交通連接器：只在不是最後一個景點時顯示 */}
+                {/* 交通連接器：只在不是最後一個景點時顯示 */}
                 {idx < day.items.length - 1 && (
                   <TransportConnector
                     item={item}
                     dayDefaultTransport={day.default_transport}
-                    onEdit={() => onEditTransport(item.item_id, item.transport_to_next)}
+                    onEdit={() =>
+                      onEditTransport(item.item_id, item.transport_to_next)
+                    }
                   />
                 )}
               </div>
@@ -317,7 +325,7 @@ function DayColumn({
  * 新增 Day 卡片
  */
 function AddDayCard() {
-  const addNewDay = useAppStore(state => state.addNewDay);
+  const addNewDay = useAppStore(state => state.addDay);
 
   return (
     <button
@@ -333,14 +341,18 @@ function AddDayCard() {
 }
 
 /**
- * 可排序的地點項目
+ * ✅ 可排序的地點項目 - 修復 data 配置
  */
 function SortablePlaceItem({
   item,
+  dayId,
+  index,
   onEdit,
   onCopy,
 }: {
   item: ItineraryItem;
+  dayId: string;
+  index: number;
   onEdit: (item: ItineraryItem) => void;
   onCopy: (item: ItineraryItem) => void;
 }) {
@@ -353,11 +365,12 @@ function SortablePlaceItem({
     transform,
     transition,
     isDragging,
-    isOver,
   } = useSortable({
     id: item.item_id,
     data: {
-      type: 'item',
+      type: 'itinerary-item', // ✅ 修復 5: 統一 type 名稱
+      dayId, // ✅ 修復 6: 加入 dayId
+      index, // ✅ 修復 7: 加入 index
       item,
     },
   });
@@ -426,18 +439,22 @@ function SortablePlaceItem({
           <Clock className="w-3 h-3" />
           <span>{item.scheduled_time}</span>
           {item.duration_minutes && (
-            <span className="text-gray-400">({item.duration_minutes} 分鐘)</span>
+            <span className="text-gray-400">
+              ({item.duration_minutes} 分鐘)
+            </span>
           )}
         </div>
       )}
 
-      {/* ✅ 地點名稱 + 備註（同一行、垂直置中） */}
+      {/* 地點名稱 + 備註 */}
       <div className="flex items-center gap-2 mb-1">
         <h4 className="font-medium text-gray-900 text-sm flex-1">
           {item.place.name}
         </h4>
         {item.notes && (
-          <p className="text-xs text-gray-600 italic flex-shrink-0">💡 {item.notes}</p>
+          <p className="text-xs text-gray-600 italic flex-shrink-0">
+            💡 {item.notes}
+          </p>
         )}
       </div>
     </div>
@@ -445,7 +462,7 @@ function SortablePlaceItem({
 }
 
 /**
- * ✅ 交通連接器（獨立卡片、間距縮小）
+ * 交通連接器
  */
 function TransportConnector({
   item,
@@ -456,7 +473,6 @@ function TransportConnector({
   dayDefaultTransport?: string;
   onEdit: () => void;
 }) {
-  // 使用 item 的交通方式，若無則使用 Day 預設
   const transportMode = item.transport_to_next || dayDefaultTransport;
   const hasTransport = !!transportMode;
 
@@ -476,7 +492,9 @@ function TransportConnector({
           <>
             <Navigation className="w-3 h-3 text-gray-500 group-hover:text-primary-600 transition-colors" />
             <span className="text-xs text-gray-600 group-hover:text-primary-700 font-medium">
-              {getTransportLabel(transportMode as ItineraryItem['transport_to_next'])}
+              {getTransportLabel(
+                transportMode as ItineraryItem['transport_to_next']
+              )}
             </span>
             {item.transport_duration_minutes && (
               <span className="text-xs text-gray-400">

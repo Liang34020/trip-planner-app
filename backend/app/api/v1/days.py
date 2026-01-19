@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete, update
 from datetime import date, timedelta
 
 from app.core.database import get_db
@@ -18,7 +18,6 @@ async def add_day(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    print("DEBUG: 正在執行 add_day API...") # <--- 加入這一行
     """
     新增一天到行程
     
@@ -33,7 +32,7 @@ async def add_day(
             Trip.user_id == current_user.user_id
         )
     )
-    trip = trip_result.unique().scalar_one_or_none()  # 加入 .unique()
+    trip = trip_result.unique().scalar_one_or_none()
     
     if not trip:
         raise HTTPException(
@@ -84,53 +83,78 @@ async def delete_day(
     - 自動重新編號後續的 Day
     - 檢查權限
     """
-    # 查詢 Day
-    day_result = await db.execute(
-        select(ItineraryDay).where(ItineraryDay.day_id == day_id)
-    )
-    day = day_result.scalar_one_or_none()
-    
-    if not day:
+    try:
+        # 查詢 Day
+        day_result = await db.execute(
+            select(ItineraryDay).where(ItineraryDay.day_id == day_id)
+        )
+        day = day_result.unique().scalar_one_or_none()
+        
+        if not day:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Day 不存在"
+            )
+        
+        # 檢查權限
+        trip_result = await db.execute(
+            select(Trip).where(
+                Trip.trip_id == day.trip_id,
+                Trip.user_id == current_user.user_id
+            )
+        )
+        trip = trip_result.unique().scalar_one_or_none()
+        
+        if not trip:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="無權限操作"
+            )
+        
+        deleted_day_number = day.day_number
+        trip_id = day.trip_id
+        
+        # 查詢所有後續的 Days
+        later_days_result = await db.execute(
+            select(ItineraryDay)
+            .where(
+                ItineraryDay.trip_id == trip_id,
+                ItineraryDay.day_number > deleted_day_number
+            )
+            .order_by(ItineraryDay.day_number)
+        )
+        later_days = later_days_result.unique().scalars().all()
+        
+        # 🔧 解決方案：先將後續天數設為臨時負數，避免 unique constraint 衝突
+        for i, later_day in enumerate(later_days):
+            later_day.day_number = -(i + 1)  # 設為負數：-1, -2, -3...
+        
+        await db.flush()  # 執行臨時更新
+        
+        # 刪除目標 Day
+        await db.execute(
+            delete(ItineraryDay).where(ItineraryDay.day_id == day_id)
+        )
+        await db.flush()  # 執行刪除
+        
+        # 將後續天數調整回正確的值
+        for i, later_day in enumerate(later_days):
+            later_day.day_number = deleted_day_number + i  # 正確的新編號
+            if later_day.date:
+                later_day.date -= timedelta(days=1)
+        
+        await db.commit()
+        
+        return None
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        print(f"❌ 刪除 Day 失敗: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Day 不存在"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"刪除 Day 失敗: {str(e)}"
         )
-    
-    # 檢查權限
-    trip_result = await db.execute(
-        select(Trip).where(
-            Trip.trip_id == day.trip_id,
-            Trip.user_id == current_user.user_id
-        )
-    )
-    trip = trip_result.unique().scalar_one_or_none()  # 加入 .unique()
-    
-    if not trip:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="無權限操作"
-        )
-    
-    deleted_day_number = day.day_number
-    
-    # 刪除 Day
-    await db.delete(day)
-    
-    # 重新編號後續的 Day
-    later_days_result = await db.execute(
-        select(ItineraryDay)
-        .where(
-            ItineraryDay.trip_id == day.trip_id,
-            ItineraryDay.day_number > deleted_day_number
-        )
-    )
-    later_days = later_days_result.scalars().all()
-    
-    for later_day in later_days:
-        later_day.day_number -= 1
-        if later_day.date:
-            later_day.date -= timedelta(days=1)
-    
-    await db.commit()
-    
-    return None

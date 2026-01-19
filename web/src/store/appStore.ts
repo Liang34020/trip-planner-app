@@ -1,515 +1,304 @@
-// src/store/appStore.ts
-
 import { create } from 'zustand';
-import type { SavedPlace, Trip, ItineraryDay, ItineraryItem } from '../types/models';
-import {
-  mockSavedPlaces,
-  mockTrip,
-  mockItineraryDays,
-} from '../utils/mockData';
-import { calculateNewSequence } from '../utils/fractionalIndexing';
-import { showToast } from '../utils/toast';
+import type { Trip, SavedPlace, ItineraryDay, ItineraryItem } from '../types/models';
+import { tripService } from '../services/tripService';
+import { itineraryService } from '../services/itineraryService';
+import { savedPlaceService } from '../services/savedPlaceService';
+import toast from 'react-hot-toast';
 
 interface AppState {
+  // 當前選中的行程
+  currentTrip: Trip | null;
+  currentTripDetail: any | null; // 包含 days 的完整行程資料
+  
+  // 收藏池
+  savedPlaces: SavedPlace[];
+  
   // UI 狀態
   isLeftPanelCollapsed: boolean;
-  toggleLeftPanel: () => void;
-
-  // 資料狀態
-  savedPlaces: SavedPlace[];
-  currentTrip: Trip | null;
+  isLoading: boolean;
+  
+  // 計算屬性（從 currentTripDetail 取得）
   itineraryDays: ItineraryDay[];
-
-  // 行動方法
-  loadMockData: () => void;
-  updateSavedPlaceStatus: (
-    savedId: string,
-    isPlaced: boolean,
-    itemId?: string
-  ) => void;
-
-  // 拖曳相關方法
-  addItemToDay: (
-    placeId: string,
-    savedId: string,
-    dayId: string,
-    dropIndex: number
-  ) => void;
-  reorderItemInDay: (itemId: string, dayId: string, dropIndex: number) => void;
-  removeItemFromDay: (itemId: string) => void;
-  updateItineraryItem: (itemId: string, updates: Partial<ItineraryItem>) => void;
-
-  // Day 管理方法
-  addNewDay: () => void;
-  removeDay: (dayId: string) => void;
-  updateDayNotes: (dayId: string, notes: string) => void;
-  updateDayDefaultTransport: (dayId: string, transport?: ItineraryDay['default_transport']) => void;
-  reorderDays: (oldIndex: number, newIndex: number) => void; // ✅ 新增 Day 排序
-
-  // 進階操作
-  copyItemToDay: (itemId: string, targetDayId: string) => void;
-  clearDay: (dayId: string) => void;
+  
+  // UI Actions
+  toggleLeftPanel: () => void;
+  
+  // Data Actions
+  loadTrip: (tripId: string) => Promise<void>;
+  loadSavedPlaces: () => Promise<void>;
+  
+  // Day 操作
+  addDay: () => Promise<void>;
+  deleteDay: (dayId: string) => Promise<void>;
+  updateDayNotes: (dayId: string, notes: string) => Promise<void>;
+  updateDayDefaultTransport: (dayId: string, transport: string) => Promise<void>;
+  removeDay: (dayId: string) => Promise<void>;
+  clearDay: (dayId: string) => Promise<void>;
+  
+  // Item 操作
+  addItemToDay: (placeId: string, dayId: string, position?: number) => Promise<void>;
+  reorderItem: (itemId: string, targetDayId: string, targetPosition: number) => Promise<void>;
+  deleteItem: (itemId: string) => Promise<void>;
+  updateItem: (itemId: string, updates: any) => Promise<void>;
+  updateItineraryItem: (itemId: string, updates: any) => Promise<void>;
+  removeItemFromDay: (itemId: string) => Promise<void>;
+  copyItemToDay: (itemId: string, targetDayId: string) => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  // 初始 UI 狀態
-  isLeftPanelCollapsed: false,
-  toggleLeftPanel: () =>
-    set(state => ({ isLeftPanelCollapsed: !state.isLeftPanelCollapsed })),
-
-  // 初始資料狀態
-  savedPlaces: [],
   currentTrip: null,
+  currentTripDetail: null,
+  savedPlaces: [],
+  isLeftPanelCollapsed: false,
+  isLoading: false,
+  
+  // ✅ 改成普通屬性，不用 getter
   itineraryDays: [],
 
-  // 載入 Mock Data
-  loadMockData: () =>
-    set({
-      savedPlaces: mockSavedPlaces,
-      currentTrip: mockTrip,
-      itineraryDays: mockItineraryDays,
-    }),
+  // UI Actions
+  toggleLeftPanel: () => {
+    set((state) => ({ isLeftPanelCollapsed: !state.isLeftPanelCollapsed }));
+  },
 
-  // 更新收藏地點的「已排入」狀態
-  updateSavedPlaceStatus: (savedId, isPlaced, itemId) =>
-    set(state => ({
-      savedPlaces: state.savedPlaces.map(sp =>
-        sp.saved_id === savedId
-          ? { ...sp, is_placed: isPlaced, current_itinerary_item_id: itemId }
-          : sp
-      ),
-    })),
+  // 載入行程詳情
+  loadTrip: async (tripId: string) => {
+    set({ isLoading: true });
+    try {
+      const tripDetail = await tripService.getTripDetail(tripId);
+      
+      console.log('===== loadTrip Debug =====');
+      console.log('tripDetail:', tripDetail);
+      console.log('days:', tripDetail.days);
+      console.log('days length:', tripDetail.days?.length);
+      console.log('========================');
+      
+      set({
+        currentTrip: tripDetail,
+        currentTripDetail: tripDetail,
+        itineraryDays: tripDetail.days || [],  // ✅ 同步更新 itineraryDays
+        isLoading: false,
+      });
+    } catch (error) {
+      console.error('載入行程失敗:', error);
+      toast.error('載入行程失敗');
+      set({ isLoading: false });
+    }
+  },
 
-  // 從收藏池拖曳地點到行程
-  addItemToDay: (placeId, savedId, dayId, dropIndex) =>
-    set(state => {
-      try {
-        const day = state.itineraryDays.find(d => d.day_id === dayId);
-        if (!day) {
-          showToast.error('找不到目標天數');
-          return state;
-        }
+  // 載入收藏池
+  loadSavedPlaces: async () => {
+    try {
+      const places = await savedPlaceService.getSavedPlaces();
+      set({ savedPlaces: places });
+    } catch (error) {
+      console.error('載入收藏池失敗:', error);
+      toast.error('載入收藏池失敗');
+    }
+  },
 
-        const place = state.savedPlaces.find(sp => sp.saved_id === savedId)?.place;
-        if (!place) {
-          showToast.error('找不到地點資料');
-          return state;
-        }
+  // 新增 Day
+  addDay: async () => {
+    const { currentTrip, loadTrip } = get();
+    if (!currentTrip) return;
 
-        // 計算新 sequence
-        const prevSeq = day.items[dropIndex - 1]?.sequence || null;
-        const nextSeq = day.items[dropIndex]?.sequence || null;
-        const newSequence = calculateNewSequence(prevSeq, nextSeq);
+    try {
+      await itineraryService.createDay(currentTrip.trip_id);
+      toast.success('新增 Day 成功');
+      await loadTrip(currentTrip.trip_id);
+    } catch (error) {
+      console.error('新增 Day 失敗:', error);
+      toast.error('新增 Day 失敗');
+    }
+  },
 
-        // ✅ 建立新項目（繼承 Day 預設交通方式）
-        const newItem: ItineraryItem = {
-          item_id: `item_${Date.now()}`,
-          day_id: dayId,
-          place_id: placeId,
-          place,
-          sequence: newSequence,
-          transport_to_next: day.default_transport, // ✅ 使用 Day 預設交通方式
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
+  // 刪除 Day
+  deleteDay: async (dayId: string) => {
+    const { currentTrip, loadTrip } = get();
+    if (!currentTrip) return;
 
-        // 更新行程
-        const updatedDays = state.itineraryDays.map(d => {
-          if (d.day_id === dayId) {
-            const newItems = [...d.items];
-            newItems.splice(dropIndex, 0, newItem);
-            return { ...d, items: newItems };
-          }
-          return d;
-        });
+    try {
+      await itineraryService.deleteDay(dayId);
+      toast.success('刪除 Day 成功');
+      await loadTrip(currentTrip.trip_id);
+    } catch (error) {
+      console.error('刪除 Day 失敗:', error);
+      toast.error('刪除 Day 失敗');
+    }
+  },
 
-        // 更新收藏池狀態
-        get().updateSavedPlaceStatus(savedId, true, newItem.item_id);
+  // 更新 Day 備註
+  updateDayNotes: async (dayId: string, notes: string) => {
+    const { currentTrip, loadTrip } = get();
+    if (!currentTrip) return;
 
-        showToast.success(`已加入「${place.name}」到行程`);
+    try {
+      await itineraryService.updateDay(dayId, { notes });
+      await loadTrip(currentTrip.trip_id);
+    } catch (error) {
+      console.error('更新備註失敗:', error);
+      toast.error('更新備註失敗');
+    }
+  },
 
-        return { itineraryDays: updatedDays };
-      } catch (error) {
-        console.error('addItemToDay error:', error);
-        showToast.error('加入景點失敗，請重試');
-        return state;
+  // 更新 Day 預設交通方式
+  updateDayDefaultTransport: async (dayId: string, transport: string) => {
+    const { currentTrip, loadTrip } = get();
+    if (!currentTrip) return;
+
+    try {
+      await itineraryService.updateDay(dayId, { default_transport: transport });
+      await loadTrip(currentTrip.trip_id);
+    } catch (error) {
+      console.error('更新交通方式失敗:', error);
+      toast.error('更新交通方式失敗');
+    }
+  },
+
+  // removeDay 別名（與 deleteDay 相同）
+  removeDay: async (dayId: string) => {
+    await get().deleteDay(dayId);
+  },
+
+  // 清空 Day（移除所有景點）
+  clearDay: async (dayId: string) => {
+    const { currentTrip, loadTrip } = get();
+    if (!currentTrip) return;
+
+    try {
+      // 獲取該 Day 的所有 Items
+      const day = get().currentTripDetail?.days.find((d: ItineraryDay) => d.day_id === dayId);
+      if (!day || !day.items) return;
+
+      // 刪除所有 Items
+      await Promise.all(
+        day.items.map((item: ItineraryItem) => itineraryService.deleteItem(item.item_id))
+      );
+
+      toast.success('清空 Day 成功');
+      await Promise.all([loadTrip(currentTrip.trip_id), get().loadSavedPlaces()]);
+    } catch (error) {
+      console.error('清空 Day 失敗:', error);
+      toast.error('清空 Day 失敗');
+    }
+  },
+
+  // 加入景點到 Day
+  addItemToDay: async (placeId: string, dayId: string, position?: number) => {
+    const { currentTrip, loadTrip, loadSavedPlaces } = get();
+    if (!currentTrip) return;
+
+    try {
+      await itineraryService.addItem({
+        day_id: dayId,
+        place_id: placeId,
+        position,
+      });
+      
+      toast.success('加入景點成功');
+      await Promise.all([loadTrip(currentTrip.trip_id), loadSavedPlaces()]);
+    } catch (error: any) {
+      console.error('加入景點失敗:', error);
+      toast.error(error.response?.data?.detail || '加入景點失敗');
+    }
+  },
+
+  // 拖曳重新排序
+  reorderItem: async (itemId: string, targetDayId: string, targetPosition: number) => {
+    const { currentTrip, loadTrip } = get();
+    if (!currentTrip) return;
+
+    try {
+      await itineraryService.reorderItem(itemId, {
+        target_day_id: targetDayId,
+        target_position: targetPosition,
+        client_timestamp: Date.now(),
+      });
+
+      await loadTrip(currentTrip.trip_id);
+    } catch (error) {
+      console.error('重新排序失敗:', error);
+      toast.error('重新排序失敗');
+      if (currentTrip) {
+        await loadTrip(currentTrip.trip_id);
       }
-    }),
+    }
+  },
 
-  // ✅ 在同一天或跨天重新排序（交通方式不跟著移動）
-  reorderItemInDay: (itemId, targetDayId, dropIndex) =>
-    set(state => {
-      // 找到原始項目
+  // 刪除景點
+  deleteItem: async (itemId: string) => {
+    const { currentTrip, loadTrip, loadSavedPlaces } = get();
+    if (!currentTrip) return;
+
+    try {
+      await itineraryService.deleteItem(itemId);
+      toast.success('刪除景點成功');
+      await Promise.all([loadTrip(currentTrip.trip_id), loadSavedPlaces()]);
+    } catch (error) {
+      console.error('刪除景點失敗:', error);
+      toast.error('刪除景點失敗');
+    }
+  },
+
+  // 更新景點資訊
+  updateItem: async (itemId: string, updates: any) => {
+    const { currentTrip, loadTrip } = get();
+    if (!currentTrip) return;
+
+    try {
+      await itineraryService.updateItem(itemId, updates);
+      toast.success('更新景點成功');
+      await loadTrip(currentTrip.trip_id);
+    } catch (error) {
+      console.error('更新景點失敗:', error);
+      toast.error('更新景點失敗');
+    }
+  },
+
+  // updateItineraryItem 別名（與 updateItem 相同）
+  updateItineraryItem: async (itemId: string, updates: any) => {
+    await get().updateItem(itemId, updates);
+  },
+
+  // removeItemFromDay 別名（與 deleteItem 相同）
+  removeItemFromDay: async (itemId: string) => {
+    await get().deleteItem(itemId);
+  },
+
+  // 複製景點到其他 Day
+  copyItemToDay: async (itemId: string, targetDayId: string) => {
+    const { currentTrip, loadTrip } = get();
+    if (!currentTrip) return;
+
+    try {
+      // 找到原始 Item
       let sourceItem: ItineraryItem | null = null;
-      let sourceDayId: string | null = null;
-      let sourceIndex: number = -1;
-
-      for (const day of state.itineraryDays) {
-        const index = day.items.findIndex(i => i.item_id === itemId);
-        if (index !== -1) {
-          sourceItem = day.items[index];
-          sourceDayId = day.day_id;
-          sourceIndex = index;
+      for (const day of get().currentTripDetail?.days || []) {
+        const item = day.items?.find((i: ItineraryItem) => i.item_id === itemId);
+        if (item) {
+          sourceItem = item;
           break;
         }
       }
 
-      if (!sourceItem || !sourceDayId) return state;
+      if (!sourceItem) {
+        toast.error('找不到要複製的景點');
+        return;
+      }
 
-      // ✅ 保存原位置的交通方式（要轉移給前一個景點）
-      const transportToTransfer = sourceItem.transport_to_next;
-
-      // 從原位置移除
-      const daysAfterRemove = state.itineraryDays.map(d => {
-        if (d.day_id === sourceDayId) {
-          const items = d.items.filter(i => i.item_id !== itemId);
-          
-          // ✅ 如果被移除的景點有交通方式，轉移給前一個景點
-          if (transportToTransfer && sourceIndex > 0 && items.length > 0) {
-            const prevIndex = Math.min(sourceIndex - 1, items.length - 1);
-            items[prevIndex] = {
-              ...items[prevIndex],
-              transport_to_next: transportToTransfer,
-              updated_at: new Date().toISOString(),
-            };
-          }
-          
-          return { ...d, items };
-        }
-        return d;
-      });
-
-      // 找到目標 Day
-      const targetDay = daysAfterRemove.find(d => d.day_id === targetDayId);
-      if (!targetDay) return state;
-
-      // 計算新 sequence
-      const prevSeq = targetDay.items[dropIndex - 1]?.sequence || null;
-      const nextSeq = targetDay.items[dropIndex]?.sequence || null;
-      const newSequence = calculateNewSequence(prevSeq, nextSeq);
-
-      // ✅ 更新項目（清除交通方式，因為交通方式留在原位）
-      const updatedItem = {
-        ...sourceItem,
+      // 加入新的 Item
+      await itineraryService.addItem({
         day_id: targetDayId,
-        sequence: newSequence,
-        transport_to_next: undefined, // ✅ 清除交通方式
-        updated_at: new Date().toISOString(),
-      };
-
-      const updatedDays = daysAfterRemove.map(d => {
-        if (d.day_id === targetDayId) {
-          const newItems = [...d.items];
-          newItems.splice(dropIndex, 0, updatedItem);
-          return { ...d, items: newItems };
-        }
-        return d;
+        place_id: sourceItem.place_id,
+        scheduled_time: sourceItem.scheduled_time || undefined,
+        duration_minutes: sourceItem.duration_minutes || undefined,
+        notes: sourceItem.notes || undefined,
       });
 
-      return { itineraryDays: updatedDays };
-    }),
-
-  // 從行程中刪除項目
-  removeItemFromDay: itemId =>
-    set(state => {
-      try {
-        // 找到該項目關聯的 savedPlace
-        let relatedSavedId: string | null = null;
-        let itemName = '';
-        
-        for (const day of state.itineraryDays) {
-          const item = day.items.find(i => i.item_id === itemId);
-          if (item) {
-            itemName = item.place.name;
-            const savedPlace = state.savedPlaces.find(
-              sp => sp.place_id === item.place_id && sp.current_itinerary_item_id === itemId
-            );
-            if (savedPlace) {
-              relatedSavedId = savedPlace.saved_id;
-            }
-            break;
-          }
-        }
-
-        // 從行程中移除
-        const updatedDays = state.itineraryDays.map(d => ({
-          ...d,
-          items: d.items.filter(i => i.item_id !== itemId),
-        }));
-
-        // 更新收藏池狀態（恢復可拖曳）
-        if (relatedSavedId) {
-          get().updateSavedPlaceStatus(relatedSavedId, false, undefined);
-        }
-
-        showToast.success(`已移除「${itemName}」`);
-
-        return { itineraryDays: updatedDays };
-      } catch (error) {
-        console.error('removeItemFromDay error:', error);
-        showToast.error('移除景點失敗，請重試');
-        return state;
-      }
-    }),
-
-  // 更新行程項目資訊
-  updateItineraryItem: (itemId, updates) =>
-    set(state => {
-      const updatedDays = state.itineraryDays.map(day => ({
-        ...day,
-        items: day.items.map(item =>
-          item.item_id === itemId
-            ? { ...item, ...updates, updated_at: new Date().toISOString() }
-            : item
-        ),
-      }));
-
-      return { itineraryDays: updatedDays };
-    }),
-
-  // 新增一天行程
-  addNewDay: () =>
-    set(state => {
-      try {
-        if (!state.currentTrip) {
-          showToast.error('沒有選擇行程');
-          return state;
-        }
-
-        const newDayNumber = state.itineraryDays.length + 1;
-        
-        // 計算新的日期（如果有 start_date）
-        let newDate: string | undefined;
-        if (state.currentTrip.start_date) {
-          const startDate = new Date(state.currentTrip.start_date);
-          startDate.setDate(startDate.getDate() + newDayNumber - 1);
-          newDate = startDate.toISOString().split('T')[0];
-        }
-
-        const newDay: ItineraryDay = {
-          day_id: `day_${Date.now()}`,
-          trip_id: state.currentTrip.trip_id,
-          day_number: newDayNumber,
-          date: newDate,
-          items: [],
-        };
-
-        showToast.success(`已新增 Day ${newDayNumber}`);
-
-        return { itineraryDays: [...state.itineraryDays, newDay] };
-      } catch (error) {
-        console.error('addNewDay error:', error);
-        showToast.error('新增失敗，請重試');
-        return state;
-      }
-    }),
-
-  // 刪除一天行程
-  removeDay: dayId =>
-    set(state => {
-      // 找到要刪除的 Day 中的所有項目
-      const dayToRemove = state.itineraryDays.find(d => d.day_id === dayId);
-      if (!dayToRemove) return state;
-
-      // 將該天的所有項目從收藏池中恢復可拖曳狀態
-      dayToRemove.items.forEach(item => {
-        const savedPlace = state.savedPlaces.find(
-          sp => sp.place_id === item.place_id && sp.current_itinerary_item_id === item.item_id
-        );
-        if (savedPlace) {
-          get().updateSavedPlaceStatus(savedPlace.saved_id, false, undefined);
-        }
-      });
-
-      // 移除該天並重新編號 + 重新計算日期
-      const updatedDays = state.itineraryDays
-        .filter(d => d.day_id !== dayId)
-        .map((day, index) => {
-          const newDayNumber = index + 1;
-          
-          // 重新計算日期（基於 trip 的 start_date）
-          let newDate: string | undefined;
-          if (state.currentTrip?.start_date) {
-            const startDate = new Date(state.currentTrip.start_date);
-            startDate.setDate(startDate.getDate() + index);
-            newDate = startDate.toISOString().split('T')[0];
-          }
-
-          return {
-            ...day,
-            day_number: newDayNumber,
-            date: newDate,
-          };
-        });
-
-      return { itineraryDays: updatedDays };
-    }),
-
-  // 更新當日備註
-  updateDayNotes: (dayId, notes) =>
-    set(state => {
-      const updatedDays = state.itineraryDays.map(day =>
-        day.day_id === dayId ? { ...day, notes } : day
-      );
-
-      return { itineraryDays: updatedDays };
-    }),
-
-  // ✅ 更新 Day 預設交通方式
-  updateDayDefaultTransport: (dayId, transport) =>
-    set(state => {
-      try {
-        const updatedDays = state.itineraryDays.map(day =>
-          day.day_id === dayId ? { ...day, default_transport: transport } : day
-        );
-
-        if (transport) {
-          showToast.success(`已設定預設交通方式`);
-        } else {
-          showToast.success(`已移除預設交通方式`);
-        }
-
-        return { itineraryDays: updatedDays };
-      } catch (error) {
-        console.error('updateDayDefaultTransport error:', error);
-        showToast.error('設定失敗，請重試');
-        return state;
-      }
-    }),
-
-  // ✅ 重新排序 Day（整天拖移）
-  reorderDays: (oldIndex, newIndex) =>
-    set(state => {
-      try {
-        const newDays = [...state.itineraryDays];
-        const [movedDay] = newDays.splice(oldIndex, 1);
-        newDays.splice(newIndex, 0, movedDay);
-
-        // 重新編號並更新日期
-        const updatedDays = newDays.map((day, index) => {
-          const newDayNumber = index + 1;
-          
-          // 重新計算日期（基於 trip 的 start_date）
-          let newDate: string | undefined;
-          if (state.currentTrip?.start_date) {
-            const startDate = new Date(state.currentTrip.start_date);
-            startDate.setDate(startDate.getDate() + index);
-            newDate = startDate.toISOString().split('T')[0];
-          }
-
-          return {
-            ...day,
-            day_number: newDayNumber,
-            date: newDate,
-          };
-        });
-
-        showToast.success(`已移動 Day ${oldIndex + 1} 到 Day ${newIndex + 1}`);
-
-        return { itineraryDays: updatedDays };
-      } catch (error) {
-        console.error('reorderDays error:', error);
-        showToast.error('移動失敗，請重試');
-        return state;
-      }
-    }),
-
-  // 複製景點到其他 Day
-  copyItemToDay: (itemId, targetDayId) =>
-    set(state => {
-      try {
-        // 找到原始項目
-        let sourceItem: ItineraryItem | null = null;
-        for (const day of state.itineraryDays) {
-          const item = day.items.find(i => i.item_id === itemId);
-          if (item) {
-            sourceItem = item;
-            break;
-          }
-        }
-
-        if (!sourceItem) {
-          showToast.error('找不到原始景點');
-          return state;
-        }
-
-        // 找到目標 Day
-        const targetDay = state.itineraryDays.find(d => d.day_id === targetDayId);
-        if (!targetDay) {
-          showToast.error('找不到目標天數');
-          return state;
-        }
-
-        // 計算新 sequence（放到最後）
-        const prevSeq = targetDay.items[targetDay.items.length - 1]?.sequence || null;
-        const newSequence = calculateNewSequence(prevSeq, null);
-
-        // 建立新項目（複製）
-        const newItem: ItineraryItem = {
-          ...sourceItem,
-          item_id: `item_${Date.now()}`,
-          day_id: targetDayId,
-          sequence: newSequence,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-
-        // 更新行程
-        const updatedDays = state.itineraryDays.map(d => {
-          if (d.day_id === targetDayId) {
-            return { ...d, items: [...d.items, newItem] };
-          }
-          return d;
-        });
-
-        showToast.success(`已複製「${sourceItem.place.name}」到 Day ${targetDay.day_number}`);
-
-        return { itineraryDays: updatedDays };
-      } catch (error) {
-        console.error('copyItemToDay error:', error);
-        showToast.error('複製失敗，請重試');
-        return state;
-      }
-    }),
-
-  // 清空某一天的所有景點
-  clearDay: dayId =>
-    set(state => {
-      try {
-        // 找到該 Day
-        const dayToClear = state.itineraryDays.find(d => d.day_id === dayId);
-        if (!dayToClear) {
-          showToast.error('找不到目標天數');
-          return state;
-        }
-
-        if (dayToClear.items.length === 0) {
-          showToast.info('此天沒有景點');
-          return state;
-        }
-
-        // 將所有項目從收藏池中恢復可拖曳狀態
-        dayToClear.items.forEach(item => {
-          const savedPlace = state.savedPlaces.find(
-            sp => sp.place_id === item.place_id && sp.current_itinerary_item_id === item.item_id
-          );
-          if (savedPlace) {
-            get().updateSavedPlaceStatus(savedPlace.saved_id, false, undefined);
-          }
-        });
-
-        // 清空該天的項目
-        const updatedDays = state.itineraryDays.map(d =>
-          d.day_id === dayId ? { ...d, items: [] } : d
-        );
-
-        showToast.success(`已清空 Day ${dayToClear.day_number}`);
-
-        return { itineraryDays: updatedDays };
-      } catch (error) {
-        console.error('clearDay error:', error);
-        showToast.error('清空失敗，請重試');
-        return state;
-      }
-    }),
+      toast.success('複製景點成功');
+      await loadTrip(currentTrip.trip_id);
+    } catch (error) {
+      console.error('複製景點失敗:', error);
+      toast.error('複製景點失敗');
+    }
+  },
 }));
