@@ -1,5 +1,10 @@
 import { create } from 'zustand';
-import type { Trip, SavedPlace, ItineraryDay, ItineraryItem } from '../types/models';
+import type {
+  Trip,
+  SavedPlace,
+  ItineraryDay,
+  ItineraryItem,
+} from '../types/models';
 import { tripService } from '../services/tripService';
 import { itineraryService } from '../services/itineraryService';
 import { savedPlaceService } from '../services/savedPlaceService';
@@ -9,35 +14,46 @@ interface AppState {
   // 當前選中的行程
   currentTrip: Trip | null;
   currentTripDetail: any | null; // 包含 days 的完整行程資料
-  
+
   // 收藏池
   savedPlaces: SavedPlace[];
-  
+
   // UI 狀態
   isLeftPanelCollapsed: boolean;
   isLoading: boolean;
-  
+
   // 計算屬性（從 currentTripDetail 取得）
   itineraryDays: ItineraryDay[];
-  
+
   // UI Actions
   toggleLeftPanel: () => void;
-  
+
   // Data Actions
   loadTrip: (tripId: string) => Promise<void>;
   loadSavedPlaces: () => Promise<void>;
-  
+
   // Day 操作
   addDay: () => Promise<void>;
   deleteDay: (dayId: string) => Promise<void>;
   updateDayNotes: (dayId: string, notes: string) => Promise<void>;
-  updateDayDefaultTransport: (dayId: string, transport: string) => Promise<void>;
+  updateDayDefaultTransport: (
+    dayId: string,
+    transport: string
+  ) => Promise<void>;
   removeDay: (dayId: string) => Promise<void>;
   clearDay: (dayId: string) => Promise<void>;
-  
+
   // Item 操作
-  addItemToDay: (placeId: string, dayId: string, position?: number) => Promise<void>;
-  reorderItem: (itemId: string, targetDayId: string, targetPosition: number) => Promise<void>;
+  addItemToDay: (
+    placeId: string,
+    dayId: string,
+    position?: number
+  ) => Promise<void>;
+  reorderItem: (
+    itemId: string,
+    targetDayId: string,
+    targetPosition: number
+  ) => Promise<void>;
   deleteItem: (itemId: string) => Promise<void>;
   updateItem: (itemId: string, updates: any) => Promise<void>;
   updateItineraryItem: (itemId: string, updates: any) => Promise<void>;
@@ -51,13 +67,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   savedPlaces: [],
   isLeftPanelCollapsed: false,
   isLoading: false,
-  
-  // ✅ 改成普通屬性，不用 getter
+
   itineraryDays: [],
 
   // UI Actions
   toggleLeftPanel: () => {
-    set((state) => ({ isLeftPanelCollapsed: !state.isLeftPanelCollapsed }));
+    set(state => ({ isLeftPanelCollapsed: !state.isLeftPanelCollapsed }));
   },
 
   // 載入行程詳情
@@ -65,17 +80,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ isLoading: true });
     try {
       const tripDetail = await tripService.getTripDetail(tripId);
-      
-      console.log('===== loadTrip Debug =====');
-      console.log('tripDetail:', tripDetail);
-      console.log('days:', tripDetail.days);
-      console.log('days length:', tripDetail.days?.length);
-      console.log('========================');
-      
+
       set({
         currentTrip: tripDetail,
         currentTripDetail: tripDetail,
-        itineraryDays: tripDetail.days || [],  // ✅ 同步更新 itineraryDays
+        itineraryDays: tripDetail.days || [],
         isLoading: false,
       });
     } catch (error) {
@@ -111,15 +120,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  // 刪除 Day
+  // ✅ 刪除 Day（修復：加入 loadSavedPlaces）
   deleteDay: async (dayId: string) => {
-    const { currentTrip, loadTrip } = get();
+    const { currentTrip, loadTrip, loadSavedPlaces } = get();
     if (!currentTrip) return;
 
     try {
       await itineraryService.deleteDay(dayId);
       toast.success('刪除 Day 成功');
-      await loadTrip(currentTrip.trip_id);
+      // ✅ 同時重新載入行程和收藏池
+      await Promise.all([loadTrip(currentTrip.trip_id), loadSavedPlaces()]);
     } catch (error) {
       console.error('刪除 Day 失敗:', error);
       toast.error('刪除 Day 失敗');
@@ -161,21 +171,25 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // 清空 Day（移除所有景點）
   clearDay: async (dayId: string) => {
-    const { currentTrip, loadTrip } = get();
+    const { currentTrip, loadTrip, loadSavedPlaces } = get();
     if (!currentTrip) return;
 
     try {
       // 獲取該 Day 的所有 Items
-      const day = get().currentTripDetail?.days.find((d: ItineraryDay) => d.day_id === dayId);
+      const day = get().currentTripDetail?.days.find(
+        (d: ItineraryDay) => d.day_id === dayId
+      );
       if (!day || !day.items) return;
 
       // 刪除所有 Items
       await Promise.all(
-        day.items.map((item: ItineraryItem) => itineraryService.deleteItem(item.item_id))
+        day.items.map((item: ItineraryItem) =>
+          itineraryService.deleteItem(item.item_id)
+        )
       );
 
       toast.success('清空 Day 成功');
-      await Promise.all([loadTrip(currentTrip.trip_id), get().loadSavedPlaces()]);
+      await Promise.all([loadTrip(currentTrip.trip_id), loadSavedPlaces()]);
     } catch (error) {
       console.error('清空 Day 失敗:', error);
       toast.error('清空 Day 失敗');
@@ -193,7 +207,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         place_id: placeId,
         position,
       });
-      
+
       toast.success('加入景點成功');
       await Promise.all([loadTrip(currentTrip.trip_id), loadSavedPlaces()]);
     } catch (error: any) {
@@ -203,7 +217,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   // 拖曳重新排序
-  reorderItem: async (itemId: string, targetDayId: string, targetPosition: number) => {
+  reorderItem: async (
+    itemId: string,
+    targetDayId: string,
+    targetPosition: number
+  ) => {
     const { currentTrip, loadTrip } = get();
     if (!currentTrip) return;
 
@@ -273,7 +291,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       // 找到原始 Item
       let sourceItem: ItineraryItem | null = null;
       for (const day of get().currentTripDetail?.days || []) {
-        const item = day.items?.find((i: ItineraryItem) => i.item_id === itemId);
+        const item = day.items?.find(
+          (i: ItineraryItem) => i.item_id === itemId
+        );
         if (item) {
           sourceItem = item;
           break;

@@ -1,17 +1,6 @@
 // src/components/layout/MiddlePanel.tsx
 
-import {
-  Calendar,
-  Clock,
-  MapPin,
-  ArrowRight,
-  Trash2,
-  Edit2,
-  Plus,
-  Copy,
-  Trash,
-  Navigation,
-} from 'lucide-react';
+import { Calendar, Clock, MapPin, ArrowRight, Trash2, Edit2, Plus, Copy, Trash, Navigation } from 'lucide-react';
 import { useDroppable } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -19,7 +8,8 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import React from 'react'
 import { useAppStore } from '../../store/appStore';
 import { getTransportLabel } from '../../types/models';
 import type { ItineraryItem, ItineraryDay } from '../../types/models';
@@ -27,12 +17,12 @@ import { EditItemModal } from '../itinerary/EditItemModal';
 import { EditDayModal } from '../itinerary/EditDayModal';
 import { CopyItemModal } from '../itinerary/CopyItemModal';
 import { EditTransportModal } from '../itinerary/EditTransportModal';
+import { setGlobalInsertInfo, getGlobalMouseY } from './AppLayout';
 
 export function MiddlePanel() {
-  // ✅ 修復 1: 使用 selector 而非解構，確保響應式更新
   const currentTrip = useAppStore(state => state.currentTrip);
   const itineraryDays = useAppStore(state => state.itineraryDays);
-
+  
   const [editingItem, setEditingItem] = useState<ItineraryItem | null>(null);
   const [editingDay, setEditingDay] = useState<ItineraryDay | null>(null);
   const [copyingItem, setCopyingItem] = useState<ItineraryItem | null>(null);
@@ -47,9 +37,7 @@ export function MiddlePanel() {
         <div className="empty-state animate-scale-in">
           <Calendar className="empty-state-icon animate-pulse-soft" />
           <h3 className="empty-state-title">尚未選擇行程</h3>
-          <p className="empty-state-description">
-            建立或選擇一個旅遊專案開始規劃
-          </p>
+          <p className="empty-state-description">建立或選擇一個旅遊專案開始規劃</p>
           <button className="btn btn-primary">+ 建立新行程</button>
         </div>
       </div>
@@ -85,9 +73,7 @@ export function MiddlePanel() {
                 onEditItem={setEditingItem}
                 onEditDay={setEditingDay}
                 onCopyItem={setCopyingItem}
-                onEditTransport={(itemId, currentMode) =>
-                  setEditingTransport({ itemId, currentMode })
-                }
+                onEditTransport={(itemId, currentMode) => setEditingTransport({ itemId, currentMode })}
               />
             </div>
           ))}
@@ -106,9 +92,7 @@ export function MiddlePanel() {
           isOpen={!!editingItem}
           onClose={() => setEditingItem(null)}
           onSave={(updates: Partial<ItineraryItem>) => {
-            useAppStore
-              .getState()
-              .updateItineraryItem(editingItem.item_id, updates);
+            useAppStore.getState().updateItineraryItem(editingItem.item_id, updates);
             setEditingItem(null);
           }}
         />
@@ -120,15 +104,10 @@ export function MiddlePanel() {
           day={editingDay}
           isOpen={!!editingDay}
           onClose={() => setEditingDay(null)}
-          onSave={(
-            notes: string,
-            defaultTransport?: ItineraryDay['default_transport']
-          ) => {
+          onSave={(notes: string, defaultTransport?: ItineraryDay['default_transport']) => {
             useAppStore.getState().updateDayNotes(editingDay.day_id, notes);
             if (defaultTransport !== undefined) {
-              useAppStore
-                .getState()
-                .updateDayDefaultTransport(editingDay.day_id, defaultTransport);
+              useAppStore.getState().updateDayDefaultTransport(editingDay.day_id, defaultTransport);
             }
             setEditingDay(null);
           }}
@@ -143,9 +122,7 @@ export function MiddlePanel() {
           isOpen={!!copyingItem}
           onClose={() => setCopyingItem(null)}
           onCopy={(targetDayId: string) => {
-            useAppStore
-              .getState()
-              .copyItemToDay(copyingItem.item_id, targetDayId);
+            useAppStore.getState().copyItemToDay(copyingItem.item_id, targetDayId);
             setCopyingItem(null);
           }}
         />
@@ -159,11 +136,9 @@ export function MiddlePanel() {
           isOpen={!!editingTransport}
           onClose={() => setEditingTransport(null)}
           onSave={(mode: string) => {
-            useAppStore
-              .getState()
-              .updateItineraryItem(editingTransport.itemId, {
-                transport_to_next: mode as ItineraryItem['transport_to_next'],
-              });
+            useAppStore.getState().updateItineraryItem(editingTransport.itemId, {
+              transport_to_next: mode as ItineraryItem['transport_to_next'],
+            });
             setEditingTransport(null);
           }}
         />
@@ -173,7 +148,7 @@ export function MiddlePanel() {
 }
 
 /**
- * ✅ 單日行程欄 - 修復拖曳目標配置
+ * 單日行程欄
  */
 function DayColumn({
   day,
@@ -189,28 +164,105 @@ function DayColumn({
   onEditTransport: (itemId: string, currentMode?: string) => void;
 }) {
   const { removeDay, clearDay } = useAppStore();
-
-  // ✅ 修復 2: 移除 useSortable，只保留 useDroppable
-  // Day 之間的拖曳排序目前未實作，避免 ref 衝突
+  
+  const [itemOverIndex, setItemOverIndex] = useState<number | null>(null);
+  
+  // ✅ 儲存每個景點的 ref，用於計算中點位置
+  const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
+  
   const { setNodeRef, isOver } = useDroppable({
     id: `${day.day_id}-droppable`,
     data: {
-      type: 'day-droppable', // ✅ 修復 3: 統一 type 名稱
-      dayId: day.day_id, // ✅ 修復 4: 加入 dayId
+      type: 'day-droppable',
+      dayId: day.day_id,
       day,
     },
   });
 
   const itemIds = day.items.map((item: any) => item.item_id);
+  
+  // ✅ 當插入位置改變時，更新全局狀態
+  useEffect(() => {
+    if (itemOverIndex !== null) {
+      setGlobalInsertInfo({
+        dayId: day.day_id,
+        insertIndex: itemOverIndex,
+      });
+    } else {
+      setGlobalInsertInfo(null);
+    }
+  }, [itemOverIndex, day.day_id]);
+  
+  // ✅ 方案 C：當滑鼠在空白區域時，尋找最近的分界線
+  useEffect(() => {
+    if (isOver && itemOverIndex === null && day.items.length > 0) {
+      const mouseY = getGlobalMouseY();
+      if (!mouseY) return;
+      
+      // 計算所有分界線位置（景點中點）
+      const boundaries: { position: number; insertIndex: number }[] = [];
+      
+      itemRefs.current.forEach((ref, idx) => {
+        if (!ref) return;
+        const rect = ref.getBoundingClientRect();
+        const middle = rect.top + rect.height / 2;
+        boundaries.push({ position: middle, insertIndex: idx });
+      });
+      
+      // 加上最後一個景點的下方分界線
+      if (itemRefs.current.length > 0) {
+        const lastRef = itemRefs.current[itemRefs.current.length - 1];
+        if (lastRef) {
+          const lastRect = lastRef.getBoundingClientRect();
+          const lastMiddle = lastRect.top + lastRect.height / 2;
+          boundaries.push({ 
+            position: lastMiddle, 
+            insertIndex: day.items.length 
+          });
+        }
+      }
+      
+      // 找到最接近的分界線
+      let closestIndex = 0;
+      let minDistance = Infinity;
+      
+      boundaries.forEach((boundary) => {
+        const distance = Math.abs(mouseY - boundary.position);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestIndex = boundary.insertIndex;
+        }
+      });
+      
+      // 判定插入位置
+      const closestBoundary = boundaries.find(b => b.insertIndex === closestIndex);
+      if (closestBoundary) {
+        if (mouseY < closestBoundary.position) {
+          setItemOverIndex(closestIndex);
+        } else {
+          setItemOverIndex(closestIndex + 1);
+        }
+      }
+      
+      console.log('🔵 空白區域判定:', {
+        mouseY,
+        boundaries,
+        closestIndex,
+        finalInsertIndex: itemOverIndex,
+      });
+    }
+  }, [isOver, itemOverIndex, day.items.length]);
+  
+  // ✅ 只有空 Day 且有東西懸停時才高亮整個 Day
+  const shouldHighlightDay = isOver && day.items.length === 0 && itemOverIndex === null;
 
   return (
     <div
       ref={setNodeRef}
-      className={`bg-white/90 backdrop-blur-sm rounded-xl overflow-hidden border transition-all duration-200 flex flex-col animate-fade-in
-        ${
-          isOver
-            ? 'border-primary-400 border-2 ring-4 ring-primary-100 shadow-medium scale-[1.02]'
-            : 'border-gray-200 shadow-soft'
+      className={`bg-white/90 backdrop-blur-sm rounded-xl overflow-hidden border transition-all duration-150 flex flex-col animate-fade-in
+        ${shouldHighlightDay
+          ? 'border-primary-400 border-2 ring-4 ring-primary-100 shadow-medium scale-[1.02]'
+          : 'border-gray-200 shadow-soft'
         }`}
     >
       {/* 日期標題 */}
@@ -241,9 +293,7 @@ function DayColumn({
           {day.items.length > 0 && (
             <button
               onClick={() => {
-                if (
-                  confirm(`確定要清空 Day ${day.day_number} 的所有景點嗎？`)
-                ) {
+                if (confirm(`確定要清空 Day ${day.day_number} 的所有景點嗎?`)) {
                   clearDay(day.day_id);
                 }
               }}
@@ -255,11 +305,7 @@ function DayColumn({
           )}
           <button
             onClick={() => {
-              if (
-                confirm(
-                  `確定要刪除 Day ${day.day_number} 嗎？\n此天的所有景點將被移除。`
-                )
-              ) {
+              if (confirm(`確定要刪除 Day ${day.day_number} 嗎?\n此天的所有景點將被移除。`)) {
                 removeDay(day.day_id);
               }
             }}
@@ -271,52 +317,70 @@ function DayColumn({
         </div>
       </div>
 
-      {/* 可排序的景點列表 */}
-      <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
-        <div className="flex-1 p-3 space-y-1 overflow-y-auto scrollbar-hide">
-          {day.items.length === 0 ? (
-            <div
-              className={`text-center py-12 rounded-lg transition-colors ${
-                isOver ? 'bg-primary-50' : 'text-gray-400'
-              }`}
-            >
+      {/* 景點清單 */}
+      <div className="flex-1 p-3 overflow-y-auto scrollbar-hide min-h-[300px]">
+        {day.items.length === 0 ? (
+          <div className="h-full flex items-center justify-center text-gray-400 text-sm">
+            <div className="text-center">
               <MapPin className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">
-                {isOver ? '放開以加入此天' : '將地點拖曳至此'}
-              </p>
+              <p>將地點拖曳至此</p>
             </div>
-          ) : (
-            day.items.map((item: any, idx: number) => (
-              <div key={item.item_id}>
-                <SortablePlaceItem
-                  item={item}
-                  dayId={day.day_id}
-                  index={idx}
-                  onEdit={onEditItem}
-                  onCopy={onCopyItem}
-                />
-                {/* 交通連接器：只在不是最後一個景點時顯示 */}
-                {idx < day.items.length - 1 && (
-                  <TransportConnector
+          </div>
+        ) : (
+          <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+            <div className="space-y-2 relative">
+              {day.items.map((item: ItineraryItem, idx: number) => (
+                <div key={item.item_id} className="relative">
+                  {/* ✅ 第一個景點上方的插入線（只在 index=0 時顯示）*/}
+                  {itemOverIndex === 0 && idx === 0 && (
+                    <div className="relative h-0 -mb-2">
+                      <div className="absolute inset-x-0 -top-1 h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent rounded-full shadow-lg animate-pulse-soft z-30"></div>
+                    </div>
+                  )}
+                  
+                  <SortablePlaceItem
                     item={item}
-                    dayDefaultTransport={day.default_transport}
-                    onEdit={() =>
-                      onEditTransport(item.item_id, item.transport_to_next)
-                    }
+                    dayId={day.day_id}
+                    index={idx}
+                    totalItems={day.items.length}
+                    onEdit={onEditItem}
+                    onCopy={onCopyItem}
+                    onItemOverChange={setItemOverIndex}
+                    ref={(el) => (itemRefs.current[idx] = el)}
                   />
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      </SortableContext>
 
-      {/* 當日備註 */}
-      {day.notes && (
-        <div className="p-3 border-t border-gray-200 bg-gray-50 text-sm text-gray-600">
-          💡 {day.notes}
-        </div>
-      )}
+                  {/* ✅ 交通連接器 - 永遠顯示（除了最後一個） */}
+                  {idx < day.items.length - 1 && (
+                    <div className="relative">
+                      <TransportConnector
+                        item={item}
+                        dayDefaultTransport={day.default_transport}
+                        onEdit={() => onEditTransport(item.item_id, item.transport_to_next)}
+                      />
+                      
+                      {/* ✅ 插入指示線 - 浮在交通方式上方 */}
+                      {itemOverIndex === idx + 1 && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+                          <div className="w-full h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent rounded-full shadow-lg animate-pulse-soft"></div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {/* ✅ LastPositionDroppable - 最後一個景點下方的拖曳區域 */}
+              {day.items.length > 0 && (
+                <LastPositionDroppable
+                  dayId={day.day_id}
+                  insertIndex={day.items.length}
+                  itemOverIndex={itemOverIndex}
+                />
+              )}
+            </div>
+          </SortableContext>
+        )}
+      </div>
     </div>
   );
 }
@@ -341,21 +405,17 @@ function AddDayCard() {
 }
 
 /**
- * ✅ 可排序的地點項目 - 修復 data 配置
+ * ✅ 可排序的地點項目 - 使用真實滑鼠座標
  */
-function SortablePlaceItem({
-  item,
-  dayId,
-  index,
-  onEdit,
-  onCopy,
-}: {
+const SortablePlaceItem = React.forwardRef<HTMLDivElement, {
   item: ItineraryItem;
   dayId: string;
   index: number;
+  totalItems: number;
   onEdit: (item: ItineraryItem) => void;
   onCopy: (item: ItineraryItem) => void;
-}) {
+  onItemOverChange: (index: number | null) => void;
+}>(({ item, dayId, index, totalItems, onEdit, onCopy, onItemOverChange }, ref) => {
   const removeItemFromDay = useAppStore(state => state.removeItemFromDay);
 
   const {
@@ -365,42 +425,108 @@ function SortablePlaceItem({
     transform,
     transition,
     isDragging,
+    isOver,
+    active,
+    rect,
+    over,
   } = useSortable({
     id: item.item_id,
     data: {
-      type: 'itinerary-item', // ✅ 修復 5: 統一 type 名稱
-      dayId, // ✅ 修復 6: 加入 dayId
-      index, // ✅ 修復 7: 加入 index
+      type: 'itinerary-item',
+      dayId,
+      index,
       item,
     },
   });
 
+  // ✅ 使用真實滑鼠座標判定插入位置
+  useEffect(() => {
+    if (!isOver || isDragging) {
+      return;
+    }
+
+    if (!rect.current) {
+      return;
+    }
+
+    const node = rect.current;
+    const cardHeight = node.height;
+    const cardTop = node.top;
+    const cardMiddle = cardTop + cardHeight / 2;
+    
+    // ✅ 使用真實滑鼠座標
+    const mouseY = getGlobalMouseY();
+    if (!mouseY) return;
+
+    // 判定邏輯：
+    // - 滑鼠在「景點中點以上」→ 插入到當前項目「上方」(index)
+    // - 滑鼠在「景點中點以下」→ 插入到當前項目「下方」(index + 1)
+    const insertIndex = mouseY < cardMiddle ? index : index + 1;
+    
+    onItemOverChange(insertIndex);
+    
+    console.log('🔵 插入位置判定:', {
+      index,
+      mouseY,
+      cardTop,
+      cardMiddle,
+      cardBottom: node.bottom,
+      insertIndex,
+      判定說明: mouseY < cardMiddle ? '滑鼠在中點上方' : '滑鼠在中點下方'
+    });
+  }, [isOver, isDragging, rect, index, onItemOverChange]);
+
+  // 清理狀態
+  useEffect(() => {
+    if (!isOver && !isDragging) {
+      onItemOverChange(null);
+    }
+  }, [isOver, isDragging, onItemOverChange]);
+
+  // ✅ 合併 refs
+  const combinedRef = (node: HTMLDivElement | null) => {
+    setNodeRef(node);
+    if (typeof ref === 'function') {
+      ref(node);
+    } else if (ref) {
+      ref.current = node;
+    }
+  };
+
   const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
+    opacity: isDragging ? 0 : 1,
+    transform: 'none',
+    transition: 'none',
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (confirm(`確定要刪除「${item.place.name}」嗎？`)) {
+      if (confirm(`確定要刪除「${item.place.name}」嗎?`)) {
         removeItemFromDay(item.item_id);
       }
     }
   };
 
+  const formatTime = (time24: string) => {
+    if (!time24) return '';
+    const [hours, minutes] = time24.split(':');
+    const hour = parseInt(hours);
+    const period = hour >= 12 ? 'PM' : 'AM';
+    const hour12 = hour % 12 || 12;
+    return `${hour12}:${minutes} ${period}`;
+  };
+
   return (
     <div
-      ref={setNodeRef}
+      ref={combinedRef}
       style={style}
-      className={`bg-white border rounded-xl p-3 transition-all duration-200 cursor-grab active:cursor-grabbing relative group border-gray-200 hover:border-primary-300 hover:shadow-soft
-        ${isDragging ? 'opacity-0' : ''}
-      `}
+      className="bg-white border border-gray-200 rounded-xl p-3 transition-all duration-150 cursor-grab active:cursor-grabbing relative group hover:border-primary-300 hover:shadow-soft"
       onKeyDown={handleKeyDown}
       {...attributes}
       {...listeners}
     >
       {/* 操作按鈕組 */}
-      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
         <button
           onClick={e => {
             e.stopPropagation();
@@ -437,26 +563,62 @@ function SortablePlaceItem({
       {item.scheduled_time && (
         <div className="flex items-center gap-1 text-xs text-gray-500 mb-2">
           <Clock className="w-3 h-3" />
-          <span>{item.scheduled_time}</span>
+          <span>{formatTime(item.scheduled_time)}</span>
           {item.duration_minutes && (
-            <span className="text-gray-400">
-              ({item.duration_minutes} 分鐘)
-            </span>
+            <span className="text-gray-400">({item.duration_minutes} 分鐘)</span>
           )}
         </div>
       )}
 
-      {/* 地點名稱 + 備註 */}
-      <div className="flex items-center gap-2 mb-1">
-        <h4 className="font-medium text-gray-900 text-sm flex-1">
-          {item.place.name}
-        </h4>
-        {item.notes && (
-          <p className="text-xs text-gray-600 italic flex-shrink-0">
-            💡 {item.notes}
-          </p>
-        )}
-      </div>
+      {/* 地點名稱 */}
+      <h4 className="font-medium text-gray-900 text-sm mb-1">
+        {item.place.name}
+      </h4>
+
+      {/* 備註 */}
+      {item.notes && (
+        <p className="text-xs text-gray-600 italic mt-1">
+          {item.notes}
+        </p>
+      )}
+    </div>
+  );
+});
+
+SortablePlaceItem.displayName = 'SortablePlaceItem';
+
+/**
+ * ✅ LastPositionDroppable - 最後一個景點下方的拖曳區域
+ */
+function LastPositionDroppable({
+  dayId,
+  insertIndex,
+  itemOverIndex,
+}: {
+  dayId: string;
+  insertIndex: number;
+  itemOverIndex: number | null;
+}) {
+  const { setNodeRef } = useDroppable({
+    id: `last-position-${dayId}`,
+    data: {
+      type: 'last-position',
+      dayId,
+      insertIndex,
+    },
+  });
+
+  return (
+    <div 
+      ref={setNodeRef}
+      className="relative flex-1 min-h-[80px]"
+    >
+      {/* 插入線 */}
+      {itemOverIndex === insertIndex && (
+        <div className="relative py-2">
+          <div className="h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent rounded-full shadow-lg animate-pulse-soft"></div>
+        </div>
+      )}
     </div>
   );
 }
@@ -482,7 +644,7 @@ function TransportConnector({
       onClick={onEdit}
     >
       {/* 連接線 */}
-      <div className="absolute inset-0 flex items-center justify-center">
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         <div className="w-px h-full bg-gray-200 group-hover:bg-primary-300 transition-colors"></div>
       </div>
 
@@ -492,9 +654,7 @@ function TransportConnector({
           <>
             <Navigation className="w-3 h-3 text-gray-500 group-hover:text-primary-600 transition-colors" />
             <span className="text-xs text-gray-600 group-hover:text-primary-700 font-medium">
-              {getTransportLabel(
-                transportMode as ItineraryItem['transport_to_next']
-              )}
+              {getTransportLabel(transportMode as ItineraryItem['transport_to_next'])}
             </span>
             {item.transport_duration_minutes && (
               <span className="text-xs text-gray-400">
@@ -514,3 +674,6 @@ function TransportConnector({
     </div>
   );
 }
+
+// 需要 import React
+// import React from 'react';
