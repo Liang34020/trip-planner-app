@@ -1,15 +1,8 @@
 // src/components/layout/MiddlePanel.tsx
 
-import { Calendar, Clock, MapPin, ArrowRight, Trash2, Edit2, Plus, Copy, Trash, Navigation } from 'lucide-react';
-import { useDroppable } from '@dnd-kit/core';
-import {
-  SortableContext,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { useState, useEffect, useRef } from 'react';
-import React from 'react'
+import React, { useState, useEffect, useRef } from 'react';
+import { Calendar, Clock, MapPin, Trash2, Edit2, Plus, Copy, Trash, Navigation } from 'lucide-react';
+import { useDroppable, useDraggable } from '@dnd-kit/core';
 import { useAppStore } from '../../store/appStore';
 import { getTransportLabel } from '../../types/models';
 import type { ItineraryItem, ItineraryDay } from '../../types/models';
@@ -167,8 +160,11 @@ function DayColumn({
   
   const [itemOverIndex, setItemOverIndex] = useState<number | null>(null);
   
-  // ✅ 儲存每個景點的 ref，用於計算中點位置
+  // 儲存每個景點的 ref，用於計算中點位置
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  // ✅ 追蹤正在拖曳的 item ID，用於排除自身的 off-by-one 問題
+  const activeItemIdRef = useRef<string | null>(null);
   
   const { setNodeRef, isOver } = useDroppable({
     id: `${day.day_id}-droppable`,
@@ -179,9 +175,102 @@ function DayColumn({
     },
   });
 
-  const itemIds = day.items.map((item: any) => item.item_id);
-  
-  // ✅ 當插入位置改變時，更新全局狀態
+  /**
+   * ✅ 核心修復：使用 requestAnimationFrame loop 持續計算插入位置
+   *
+   * 原問題：getGlobalMouseY() 讀取的是 module-level 變數（非 React state），
+   * useEffect 不會因滑鼠移動而重新執行，導致插入線「卡在拖曳起始位置」。
+   *
+   * 解法：isOver=true 時啟動 RAF loop，每幀讀取最新 mouseY 並重算 insertIndex。
+   * isOver=false 時停止 loop，清除插入線。
+   */
+  useEffect(() => {
+    if (!isOver || day.items.length === 0) {
+      setItemOverIndex(null);
+      return;
+    }
+
+    let rafId: number;
+
+    const computeInsertIndex = () => {
+      const mouseY = getGlobalMouseY();
+
+      if (mouseY !== null) {
+        const distances: {
+          index: number;
+          middle: number;
+          distance: number;
+          absDistance: number;
+        }[] = [];
+
+        itemRefs.current.forEach((ref, index) => {
+          if (!ref) return;
+
+          // ✅ 修復 off-by-one：排除正在被拖曳的自身元素參與計算
+          const itemId = day.items[index]?.item_id;
+          if (itemId && itemId === activeItemIdRef.current) return;
+
+          const rect = ref.getBoundingClientRect();
+          // 過濾真正不可見的元素（height=0 表示已被 unmount 或 hidden）
+          if (rect.height === 0) return;
+
+          const middle = rect.top + rect.height / 2;
+          const distance = mouseY - middle;
+
+          distances.push({
+            index,
+            middle,
+            distance,
+            absDistance: Math.abs(distance),
+          });
+        });
+
+        if (distances.length > 0) {
+          // 找距離滑鼠最近的景點
+          let closest = distances[0];
+          for (const d of distances) {
+            if (d.absDistance < closest.absDistance) {
+              closest = d;
+            } else if (d.absDistance === closest.absDistance && d.distance > 0) {
+              // 距離相同時選下方那個（正值優先），讓行為更直覺
+              closest = d;
+            }
+          }
+
+          // 帶符號距離決定插入方向：
+          // distance >= 0 → 滑鼠在景點下方 → 插到該景點後面（index + 1）
+          // distance < 0  → 滑鼠在景點上方 → 插到該景點前面（index）
+          const insertIndex = closest.distance >= 0
+            ? closest.index + 1
+            : closest.index;
+
+          setItemOverIndex(prev => {
+            // 值未改變時不 setState，避免無謂的 re-render
+            if (prev !== insertIndex) {
+              console.log('🔵 統一判定:', {
+                mouseY,
+                closestIndex: closest.index,
+                distance: closest.distance,
+                insertIndex,
+              });
+              return insertIndex;
+            }
+            return prev;
+          });
+        }
+      }
+
+      rafId = requestAnimationFrame(computeInsertIndex);
+    };
+
+    rafId = requestAnimationFrame(computeInsertIndex);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [isOver, day.items]); // 依賴 day.items（引用），景點增減時重啟 loop
+
+  // 當插入位置改變時，同步更新全局狀態供 AppLayout.handleDragEnd 讀取
   useEffect(() => {
     if (itemOverIndex !== null) {
       setGlobalInsertInfo({
@@ -192,69 +281,15 @@ function DayColumn({
       setGlobalInsertInfo(null);
     }
   }, [itemOverIndex, day.day_id]);
-  
-  // ✅ 方案 C：當滑鼠在空白區域時，尋找最近的分界線
+
+  // isOver 變 false 時確保清除全局狀態，避免舊資訊殘留影響下次 drop
   useEffect(() => {
-    if (isOver && itemOverIndex === null && day.items.length > 0) {
-      const mouseY = getGlobalMouseY();
-      if (!mouseY) return;
-      
-      // 計算所有分界線位置（景點中點）
-      const boundaries: { position: number; insertIndex: number }[] = [];
-      
-      itemRefs.current.forEach((ref, idx) => {
-        if (!ref) return;
-        const rect = ref.getBoundingClientRect();
-        const middle = rect.top + rect.height / 2;
-        boundaries.push({ position: middle, insertIndex: idx });
-      });
-      
-      // 加上最後一個景點的下方分界線
-      if (itemRefs.current.length > 0) {
-        const lastRef = itemRefs.current[itemRefs.current.length - 1];
-        if (lastRef) {
-          const lastRect = lastRef.getBoundingClientRect();
-          const lastMiddle = lastRect.top + lastRect.height / 2;
-          boundaries.push({ 
-            position: lastMiddle, 
-            insertIndex: day.items.length 
-          });
-        }
-      }
-      
-      // 找到最接近的分界線
-      let closestIndex = 0;
-      let minDistance = Infinity;
-      
-      boundaries.forEach((boundary) => {
-        const distance = Math.abs(mouseY - boundary.position);
-        if (distance < minDistance) {
-          minDistance = distance;
-          closestIndex = boundary.insertIndex;
-        }
-      });
-      
-      // 判定插入位置
-      const closestBoundary = boundaries.find(b => b.insertIndex === closestIndex);
-      if (closestBoundary) {
-        if (mouseY < closestBoundary.position) {
-          setItemOverIndex(closestIndex);
-        } else {
-          setItemOverIndex(closestIndex + 1);
-        }
-      }
-      
-      console.log('🔵 空白區域判定:', {
-        mouseY,
-        boundaries,
-        closestIndex,
-        finalInsertIndex: itemOverIndex,
-      });
+    if (!isOver) {
+      setGlobalInsertInfo(null);
     }
-  }, [isOver, itemOverIndex, day.items.length]);
-  
-  // ✅ 只有空 Day 且有東西懸停時才高亮整個 Day
-  const shouldHighlightDay = isOver && day.items.length === 0 && itemOverIndex === null;
+  }, [isOver]);
+
+  const shouldHighlightDay = isOver && day.items.length === 0;
 
   return (
     <div
@@ -318,7 +353,7 @@ function DayColumn({
       </div>
 
       {/* 景點清單 */}
-      <div className="flex-1 p-3 overflow-y-auto scrollbar-hide min-h-[300px]">
+      <div className="flex-1 p-3 overflow-y-auto scrollbar-hide min-h-[400px]">
         {day.items.length === 0 ? (
           <div className="h-full flex items-center justify-center text-gray-400 text-sm">
             <div className="text-center">
@@ -327,60 +362,68 @@ function DayColumn({
             </div>
           </div>
         ) : (
-          <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
-            <div className="space-y-2 relative">
-              {day.items.map((item: ItineraryItem, idx: number) => (
-                <div key={item.item_id} className="relative">
-                  {/* ✅ 第一個景點上方的插入線（只在 index=0 時顯示）*/}
-                  {itemOverIndex === 0 && idx === 0 && (
-                    <div className="relative h-0 -mb-2">
-                      <div className="absolute inset-x-0 -top-1 h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent rounded-full shadow-lg animate-pulse-soft z-30"></div>
-                    </div>
-                  )}
-                  
-                  <SortablePlaceItem
-                    item={item}
-                    dayId={day.day_id}
-                    index={idx}
-                    totalItems={day.items.length}
-                    onEdit={onEditItem}
-                    onCopy={onCopyItem}
-                    onItemOverChange={setItemOverIndex}
-                    ref={(el) => (itemRefs.current[idx] = el)}
-                  />
+          <div className="space-y-2 relative">
+            {day.items.map((item: ItineraryItem, idx: number) => (
+              <React.Fragment key={item.item_id}>
+                {/* 插入線：目標景點上方 */}
+                {itemOverIndex === idx && (
+                  <InsertLine position="above" isFirst={idx === 0} />
+                )}
 
-                  {/* ✅ 交通連接器 - 永遠顯示（除了最後一個） */}
-                  {idx < day.items.length - 1 && (
-                    <div className="relative">
-                      <TransportConnector
-                        item={item}
-                        dayDefaultTransport={day.default_transport}
-                        onEdit={() => onEditTransport(item.item_id, item.transport_to_next)}
-                      />
-                      
-                      {/* ✅ 插入指示線 - 浮在交通方式上方 */}
-                      {itemOverIndex === idx + 1 && (
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
-                          <div className="w-full h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent rounded-full shadow-lg animate-pulse-soft"></div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-
-              {/* ✅ LastPositionDroppable - 最後一個景點下方的拖曳區域 */}
-              {day.items.length > 0 && (
-                <LastPositionDroppable
-                  dayId={day.day_id}
-                  insertIndex={day.items.length}
-                  itemOverIndex={itemOverIndex}
+                <DraggablePlaceItem
+                  item={item}
+                  onEdit={onEditItem}
+                  onCopy={onCopyItem}
+                  onDragStart={() => { activeItemIdRef.current = item.item_id; }}
+                  onDragEnd={() => { activeItemIdRef.current = null; }}
+                  ref={(el) => (itemRefs.current[idx] = el)}
                 />
-              )}
-            </div>
-          </SortableContext>
+
+                {/* 交通連接器（最後一個景點不顯示） */}
+                {idx < day.items.length - 1 && (
+                  <TransportConnector
+                    item={item}
+                    dayDefaultTransport={day.default_transport}
+                    onEdit={() => onEditTransport(item.item_id, item.transport_to_next)}
+                  />
+                )}
+
+                {/* 插入線：最後一個景點的下方 */}
+                {idx === day.items.length - 1 && itemOverIndex === day.items.length && (
+                  <InsertLine position="below" isFirst={false} />
+                )}
+              </React.Fragment>
+            ))}
+          </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * 插入線組件（簡化版）
+ * - above + isFirst：absolute 定位，避免撐開第一個景點上方的空間
+ * - 其他情況：用 padding 自然撐開，視覺上更協調
+ */
+function InsertLine({
+  position,
+  isFirst,
+}: {
+  position: 'above' | 'below';
+  isFirst: boolean;
+}) {
+  if (position === 'above' && isFirst) {
+    return (
+      <div className="relative h-0 -mb-1">
+        <div className="absolute inset-x-0 -top-1 h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent rounded-full shadow-lg animate-pulse-soft z-30" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative py-1.5">
+      <div className="h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent rounded-full shadow-lg animate-pulse-soft" />
     </div>
   );
 }
@@ -405,85 +448,43 @@ function AddDayCard() {
 }
 
 /**
- * ✅ 可排序的地點項目 - 使用真實滑鼠座標
+ * 可拖曳的地點項目（useDraggable）
+ * 新增 onDragStart / onDragEnd：讓父層 DayColumn 能追蹤正在拖曳的 item ID
  */
-const SortablePlaceItem = React.forwardRef<HTMLDivElement, {
+const DraggablePlaceItem = React.forwardRef<HTMLDivElement, {
   item: ItineraryItem;
-  dayId: string;
-  index: number;
-  totalItems: number;
   onEdit: (item: ItineraryItem) => void;
   onCopy: (item: ItineraryItem) => void;
-  onItemOverChange: (index: number | null) => void;
-}>(({ item, dayId, index, totalItems, onEdit, onCopy, onItemOverChange }, ref) => {
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
+}>(({ item, onEdit, onCopy, onDragStart, onDragEnd }, ref) => {
   const removeItemFromDay = useAppStore(state => state.removeItemFromDay);
 
   const {
     attributes,
     listeners,
     setNodeRef,
-    transform,
-    transition,
     isDragging,
-    isOver,
-    active,
-    rect,
-    over,
-  } = useSortable({
+  } = useDraggable({
     id: item.item_id,
     data: {
       type: 'itinerary-item',
-      dayId,
-      index,
       item,
     },
   });
 
-  // ✅ 使用真實滑鼠座標判定插入位置
+  // isDragging 變化時通知父元件
+  const prevIsDraggingRef = useRef(false);
   useEffect(() => {
-    if (!isOver || isDragging) {
-      return;
+    if (isDragging && !prevIsDraggingRef.current) {
+      onDragStart?.();
+    } else if (!isDragging && prevIsDraggingRef.current) {
+      onDragEnd?.();
     }
+    prevIsDraggingRef.current = isDragging;
+  }, [isDragging, onDragStart, onDragEnd]);
 
-    if (!rect.current) {
-      return;
-    }
-
-    const node = rect.current;
-    const cardHeight = node.height;
-    const cardTop = node.top;
-    const cardMiddle = cardTop + cardHeight / 2;
-    
-    // ✅ 使用真實滑鼠座標
-    const mouseY = getGlobalMouseY();
-    if (!mouseY) return;
-
-    // 判定邏輯：
-    // - 滑鼠在「景點中點以上」→ 插入到當前項目「上方」(index)
-    // - 滑鼠在「景點中點以下」→ 插入到當前項目「下方」(index + 1)
-    const insertIndex = mouseY < cardMiddle ? index : index + 1;
-    
-    onItemOverChange(insertIndex);
-    
-    console.log('🔵 插入位置判定:', {
-      index,
-      mouseY,
-      cardTop,
-      cardMiddle,
-      cardBottom: node.bottom,
-      insertIndex,
-      判定說明: mouseY < cardMiddle ? '滑鼠在中點上方' : '滑鼠在中點下方'
-    });
-  }, [isOver, isDragging, rect, index, onItemOverChange]);
-
-  // 清理狀態
-  useEffect(() => {
-    if (!isOver && !isDragging) {
-      onItemOverChange(null);
-    }
-  }, [isOver, isDragging, onItemOverChange]);
-
-  // ✅ 合併 refs
+  // 合併 dnd-kit ref 與父層 forwardRef
   const combinedRef = (node: HTMLDivElement | null) => {
     setNodeRef(node);
     if (typeof ref === 'function') {
@@ -491,12 +492,6 @@ const SortablePlaceItem = React.forwardRef<HTMLDivElement, {
     } else if (ref) {
       ref.current = node;
     }
-  };
-
-  const style = {
-    opacity: isDragging ? 0 : 1,
-    transform: 'none',
-    transition: 'none',
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -519,7 +514,8 @@ const SortablePlaceItem = React.forwardRef<HTMLDivElement, {
   return (
     <div
       ref={combinedRef}
-      style={style}
+      // 拖曳時半透明（0.3），讓使用者明確感知「正在移動」
+      style={{ opacity: isDragging ? 0.3 : 1 }}
       className="bg-white border border-gray-200 rounded-xl p-3 transition-all duration-150 cursor-grab active:cursor-grabbing relative group hover:border-primary-300 hover:shadow-soft"
       onKeyDown={handleKeyDown}
       {...attributes}
@@ -585,43 +581,7 @@ const SortablePlaceItem = React.forwardRef<HTMLDivElement, {
   );
 });
 
-SortablePlaceItem.displayName = 'SortablePlaceItem';
-
-/**
- * ✅ LastPositionDroppable - 最後一個景點下方的拖曳區域
- */
-function LastPositionDroppable({
-  dayId,
-  insertIndex,
-  itemOverIndex,
-}: {
-  dayId: string;
-  insertIndex: number;
-  itemOverIndex: number | null;
-}) {
-  const { setNodeRef } = useDroppable({
-    id: `last-position-${dayId}`,
-    data: {
-      type: 'last-position',
-      dayId,
-      insertIndex,
-    },
-  });
-
-  return (
-    <div 
-      ref={setNodeRef}
-      className="relative flex-1 min-h-[80px]"
-    >
-      {/* 插入線 */}
-      {itemOverIndex === insertIndex && (
-        <div className="relative py-2">
-          <div className="h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent rounded-full shadow-lg animate-pulse-soft"></div>
-        </div>
-      )}
-    </div>
-  );
-}
+DraggablePlaceItem.displayName = 'DraggablePlaceItem';
 
 /**
  * 交通連接器
@@ -674,6 +634,3 @@ function TransportConnector({
     </div>
   );
 }
-
-// 需要 import React
-// import React from 'react';
