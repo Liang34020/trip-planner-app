@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -12,10 +12,12 @@ import type {
   DragStartEvent,
   DragEndEvent,
 } from '@dnd-kit/core';
+import { setDroppedItemId, setFadingOutItemId, snapshotAllDays } from '../../utils/animationState';
 import { LeftPanel } from './LeftPanel';
-import { MiddlePanel } from './MiddlePanel';
+import { MiddlePanel, setGlobalMouseX } from './MiddlePanel';
 import { RightPanel } from './RightPanel';
 import { useAppStore } from '../../store/appStore';
+import type { ItineraryItem } from '../../types/models';
 
 // ─────────────────────────────────────────────
 // Module-level 全局變數（非 React state，讀寫不觸發 re-render）
@@ -27,11 +29,14 @@ let globalInsertInfo: {
   insertIndex: number;
 } | null = null;
 
+/** Day 拖曳時計算出的橫向插入位置（在第幾個 Day 之前插入） */
+let globalDayInsertIndex: number | null = null;
+
 /** 即時滑鼠 Y 座標，供 MiddlePanel RAF loop 讀取 */
 let globalMouseY: number | null = null;
 
-/** 拖曳開始時的初始 Y，用於 delta 計算 */
-let initialMouseY: number | null = null;
+/** 即時滑鼠 X 座標，供 MiddlePanel RAF loop 判斷左右邊界 */
+let globalMouseX: number | null = null;
 
 // 導出供 MiddlePanel 使用
 export function setGlobalInsertInfo(info: { dayId: string; insertIndex: number } | null) {
@@ -42,6 +47,14 @@ export function getGlobalMouseY(): number | null {
   return globalMouseY;
 }
 
+export function setGlobalDayInsertIndex(index: number | null) {
+  globalDayInsertIndex = index;
+}
+
+export function getGlobalDayInsertIndex(): number | null {
+  return globalDayInsertIndex;
+}
+
 // ─────────────────────────────────────────────
 // AppLayout
 // ─────────────────────────────────────────────
@@ -49,12 +62,15 @@ export function getGlobalMouseY(): number | null {
 export default function AppLayout() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<'place' | 'item' | 'day' | null>(null);
+  const [activeItem, setActiveItem] = useState<ItineraryItem | null>(null);
 
   const {
     loadTrip,
     loadSavedPlaces,
     currentTripDetail,
+    itineraryDays,
     reorderItem,
+    reorderDay,
     addItemToDay,
     savedPlaces,
     removeItemFromDay,
@@ -96,6 +112,7 @@ export default function AppLayout() {
       setActiveType('place');
     } else if (activeData?.type === 'itinerary-item') {
       setActiveType('item');
+      setActiveItem(activeData.item as ItineraryItem);
     } else if (activeData?.type === 'day') {
       setActiveType('day');
     }
@@ -112,6 +129,7 @@ export default function AppLayout() {
     // 重置 UI 狀態
     setActiveId(null);
     setActiveType(null);
+    setActiveItem(null);
     globalInsertInfo = null;
 
     if (!over || !over.data.current) {
@@ -140,6 +158,9 @@ export default function AppLayout() {
       (overType === 'saved-place' || overType === 'left-panel')
     ) {
       console.log('✅ 拖回收藏池：移除景點', { itemId: activeItemId });
+      snapshotAllDays(activeItemId);
+      setFadingOutItemId(activeItemId);
+      await new Promise(resolve => setTimeout(resolve, 250)); // 等淡出動畫
       try {
         await removeItemFromDay(activeItemId);
       } catch (error) {
@@ -211,22 +232,71 @@ export default function AppLayout() {
         return;
       }
 
+      // ✅ 原地放開判斷：同一天且插入位置等於目前位置，直接取消
+      if (insertInfo) {
+        const targetDay = itineraryDays.find(d => d.day_id === insertInfo.dayId);
+        const currentIndex = targetDay?.items.findIndex(
+          (i: ItineraryItem) => i.item_id === itemId
+        ) ?? -1;
+        const isSamePosition =
+          currentIndex !== -1 &&
+          (insertInfo.insertIndex === currentIndex ||
+            insertInfo.insertIndex === currentIndex + 1);
+        if (isSamePosition) {
+          console.log('🔵 原地放開：位置未變，取消');
+          return;
+        }
+      }
+
       if (insertInfo && insertInfo.dayId === targetDayId) {
-        // 有精確插入位置
         console.log('✅ 移動/重排景點（指定位置）:', { itemId, ...insertInfo });
+        snapshotAllDays(itemId);
+        setDroppedItemId(itemId);
         try {
           await reorderItem(itemId, insertInfo.dayId, insertInfo.insertIndex);
         } catch (error) {
           console.error('❌ 重排景點失敗:', error);
         }
       } else {
-        // 無插入位置（拖到空 Day）→ 插到 index 0
         console.log('✅ 移動景點到空 Day:', { itemId, targetDayId });
+        snapshotAllDays(itemId);
+        setDroppedItemId(itemId);
         try {
           await reorderItem(itemId, targetDayId, 0);
         } catch (error) {
           console.error('❌ 移動到空 Day 失敗:', error);
         }
+      }
+      return;
+    }
+
+    // ─────────────────────────────────────────────
+    // Day 整天拖曳排序
+    // ─────────────────────────────────────────────
+    if (activeData?.type === 'day') {
+      const dayInsertIndex = globalDayInsertIndex;
+      globalDayInsertIndex = null;
+
+      if (dayInsertIndex === null) {
+        console.log('🔵 Day 拖曳取消：無插入位置');
+        return;
+      }
+
+      // ✅ 原地判斷：找被拖 Day 目前的位置，插入前後都算原地
+      const currentDayIndex = itineraryDays.findIndex(d => d.day_id === activeItemId);
+      if (
+        currentDayIndex !== -1 &&
+        (dayInsertIndex === currentDayIndex || dayInsertIndex === currentDayIndex + 1)
+      ) {
+        console.log('🔵 Day 原地放開：位置未變，取消');
+        return;
+      }
+
+      console.log('✅ Day 重新排序:', { dayId: activeItemId, targetPosition: dayInsertIndex });
+      try {
+        await reorderDay(activeItemId, dayInsertIndex);
+      } catch (error) {
+        console.error('❌ Day 重新排序失敗:', error);
       }
       return;
     }
@@ -303,12 +373,19 @@ export default function AppLayout() {
             );
           })()}
 
-          {activeType === 'item' && activeId && (
+          {activeType === 'item' && activeItem && (
             <div className="w-64 opacity-90 scale-105 shadow-2xl bg-white rounded-lg p-4 border-2 border-blue-500">
-              <div className="text-sm text-blue-600 font-medium flex items-center gap-1">
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              <h4 className="font-semibold text-gray-900 mb-1 text-sm">
+                {activeItem.place.name}
+              </h4>
+              {activeItem.place.address && (
+                <p className="text-xs text-gray-500 line-clamp-1 mb-2">
+                  {activeItem.place.address}
+                </p>
+              )}
+              <div className="text-xs text-blue-600 font-medium flex items-center gap-1">
+                <svg className="w-4 h-4 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4" />
                 </svg>
                 移動中...
               </div>
@@ -323,30 +400,45 @@ export default function AppLayout() {
 // ─────────────────────────────────────────────
 // ✅ DragMonitor：在 DndContext 內部追蹤滑鼠座標
 // 必須是獨立組件，才能在 DndContext 內呼叫 useDndMonitor
+//
+// ⚠️ 為什麼不用 delta 計算座標：
+//   delta.y = 相對於拖曳「起點」的位移，不含容器滾動偏移。
+//   當使用者拖曳同時滾動卡片時，同樣的 delta 對應的視覺位置會偏移。
+//
+// ✅ 解法：直接監聽 pointermove 取得真實 clientX/clientY，
+//   clientX/Y 永遠是相對於視窗的即時座標，不受滾動影響。
 // ─────────────────────────────────────────────
 function DragMonitor() {
+  const isDraggingRef = useRef(false);
+
   useDndMonitor({
-    onDragStart(event) {
-      if (event.activatorEvent && 'clientY' in event.activatorEvent) {
-        initialMouseY = (event.activatorEvent as PointerEvent).clientY;
-        globalMouseY = initialMouseY;
-        console.log('🟢 DragMonitor: 拖曳開始，初始 Y:', initialMouseY);
-      }
-    },
-    onDragMove(event) {
-      if (initialMouseY !== null && event.delta) {
-        globalMouseY = initialMouseY + event.delta.y;
-      }
+    onDragStart() {
+      isDraggingRef.current = true;
     },
     onDragEnd() {
-      // ✅ 注意：這裡只清 mouseY，不清 globalInsertInfo
-      // globalInsertInfo 由 handleDragEnd 在讀取後自行清除，
-      // 避免執行順序競爭導致 handleDragEnd 讀到 null
+      isDraggingRef.current = false;
       globalMouseY = null;
-      initialMouseY = null;
+      globalMouseX = null;
+      setGlobalMouseX(null);
       console.log('🔴 DragMonitor: 拖曳結束');
     },
   });
+
+  useEffect(() => {
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!isDraggingRef.current) return;
+      // clientX/Y 直接就是視窗座標，不受任何滾動影響
+      globalMouseY = e.clientY;
+      globalMouseX = e.clientX;
+      setGlobalMouseX(globalMouseX);
+    };
+
+    // capture:true 確保在任何子元素攔截前都能收到事件
+    window.addEventListener('pointermove', handlePointerMove, { capture: true });
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove, { capture: true });
+    };
+  }, []);
 
   return null;
 }

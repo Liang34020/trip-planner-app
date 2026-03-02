@@ -87,4 +87,14 @@ export const itineraryService = {
   async deleteItem(itemId: string): Promise<void> {
     await apiClient.delete(`/items/${itemId}`);
   },
+
+  /**
+   * 拖移景點
+   */
+  async reorderDay(dayId: string, targetPosition: number): Promise<void> {
+    await apiClient.patch(`/days/${dayId}/reorder`, {
+      target_position: targetPosition,
+    });
+  }
 };
+

@@ -247,3 +247,72 @@ async def delete_day(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"刪除 Day 失敗: {str(e)}"
         )
+
+
+
+class ReorderDayRequest(BaseModel):
+    """拖曳 Day 排序的請求"""
+    target_position: int  # 目標位置（0-based，在所有 Day 中的位置）
+
+
+@router.patch("/days/{day_id}/reorder")
+async def reorder_day(
+    day_id: str,
+    reorder_data: ReorderDayRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    拖曳重新排序 Day（整天移動）
+
+    策略：直接重新分配所有 Day 的 day_number（1-based）
+    - Day 數量通常 <= 14，批次更新成本極低
+    - 比 Fractional Indexing 更直覺，day_number 永遠連續
+    """
+    try:
+        service = ItineraryService(db)
+
+        # 驗證權限（確認此 Day 屬於當前使用者）
+        day = await service.verify_day_ownership(day_id, current_user.user_id)
+
+        # 取得該行程的所有 Day，按 day_number 排序
+        # ✅ 使用 unique() 避免 SQLAlchemy 2.0 的 relationship 重複問題
+        result = await db.execute(
+            select(ItineraryDay)
+            .where(ItineraryDay.trip_id == day.trip_id)
+            .order_by(ItineraryDay.day_number)
+        )
+        all_days = list(result.unique().scalars().all())
+
+        # 從列表中移除要移動的 Day
+        moving_day = next(d for d in all_days if str(d.day_id) == day_id)
+        all_days.remove(moving_day)
+
+        # 插入到目標位置
+        target_pos = max(0, min(reorder_data.target_position, len(all_days)))
+        all_days.insert(target_pos, moving_day)
+
+        # ✅ 先設為臨時值（加 1000），避免更新過程中 unique constraint 衝突
+        for i, d in enumerate(all_days):
+            d.day_number = 1000 + i
+        await db.flush()
+
+        # 再設為正確值
+        for i, d in enumerate(all_days):
+            d.day_number = i + 1
+
+        await db.commit()
+
+        return {"success": True, "message": f"Day 已移動到第 {target_pos + 1} 天"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        print(f"❌ Day 重新排序失敗: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Day 重新排序失敗: {str(e)}"
+        )

@@ -9,6 +9,7 @@ import { tripService } from '../services/tripService';
 import { itineraryService } from '../services/itineraryService';
 import { savedPlaceService } from '../services/savedPlaceService';
 import toast from 'react-hot-toast';
+import { setDroppedItemId, setPendingFlip } from '../utils/animationState';
 
 interface AppState {
   // 當前選中的行程
@@ -54,6 +55,7 @@ interface AppState {
     targetDayId: string,
     targetPosition: number
   ) => Promise<void>;
+  reorderDay: (dayId: string, targetPosition: number) => Promise<void>;
   deleteItem: (itemId: string) => Promise<void>;
   updateItem: (itemId: string, updates: any) => Promise<void>;
   updateItineraryItem: (itemId: string, updates: any) => Promise<void>;
@@ -202,7 +204,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!currentTrip) return;
 
     try {
-      await itineraryService.addItem({
+      // ✅ API 呼叫前先設 pendingFlip，讓 loadTrip render 後執行 FLIP
+      setPendingFlip(true);
+
+      const newItem = await itineraryService.addItem({
         day_id: dayId,
         place_id: placeId,
         position,
@@ -210,7 +215,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       toast.success('加入景點成功');
       await Promise.all([loadTrip(currentTrip.trip_id), loadSavedPlaces()]);
+
+      // ✅ loadTrip 完成後設 droppedItemId，新景點已 mount，淡入才能觸發
+      if (newItem?.item_id) {
+        setDroppedItemId(newItem.item_id);
+      }
     } catch (error: any) {
+      setPendingFlip(false); // 失敗時清除
       console.error('加入景點失敗:', error);
       toast.error(error.response?.data?.detail || '加入景點失敗');
     }
@@ -222,8 +233,49 @@ export const useAppStore = create<AppState>((set, get) => ({
     targetDayId: string,
     targetPosition: number
   ) => {
-    const { currentTrip, loadTrip } = get();
-    if (!currentTrip) return;
+    const { currentTrip, loadTrip, currentTripDetail } = get();
+    if (!currentTrip || !currentTripDetail) return;
+
+    // ✅ 樂觀更新：先在本地計算新的 days 順序，立刻更新 UI
+    const prevDays = currentTripDetail.days as ItineraryDay[];
+
+    // 找到被移動的 item 和它原本所在的 day
+    let movingItem: ItineraryItem | null = null;
+    let sourceDayId: string | null = null;
+    for (const day of prevDays) {
+      const found = day.items.find((i: ItineraryItem) => i.item_id === itemId);
+      if (found) { movingItem = found; sourceDayId = day.day_id; break; }
+    }
+    if (!movingItem || !sourceDayId) return;
+
+    // 建立樂觀更新後的 days
+    const optimisticDays = prevDays.map((day: ItineraryDay) => {
+      // 從原本的 day 移除
+      if (day.day_id === sourceDayId) {
+        return { ...day, items: day.items.filter((i: ItineraryItem) => i.item_id !== itemId) };
+      }
+      return day;
+    }).map((day: ItineraryDay) => {
+      // 插入到目標 day 的指定位置
+      if (day.day_id === targetDayId) {
+        const newItems = [...day.items];
+        // 如果是同一天，items 已經移除過了
+        const insertPos = Math.min(targetPosition, newItems.length);
+        newItems.splice(insertPos, 0, { ...movingItem!, day_id: targetDayId });
+        return { ...day, items: newItems };
+      }
+      return day;
+    });
+
+    // 立刻更新 UI（FLIP 動畫會在這次 render 後觸發）
+    console.log('🔵 樂觀更新順序:', optimisticDays.map((d: ItineraryDay) =>
+      d.items.map((i: ItineraryItem) => i.place?.name || i.item_id.slice(0, 6)).join(' → ')
+    ).join(' | '));
+
+    set({
+      itineraryDays: optimisticDays,
+      currentTripDetail: { ...currentTripDetail, days: optimisticDays },
+    });
 
     try {
       await itineraryService.reorderItem(itemId, {
@@ -231,14 +283,43 @@ export const useAppStore = create<AppState>((set, get) => ({
         target_position: targetPosition,
         client_timestamp: Date.now(),
       });
-
       await loadTrip(currentTrip.trip_id);
+      console.log('🟢 loadTrip 後順序:', get().itineraryDays.map((d: ItineraryDay) =>
+        d.items.map((i: ItineraryItem) => i.place?.name || i.item_id.slice(0, 6)).join(' → ')
+      ).join(' | '));
     } catch (error) {
       console.error('重新排序失敗:', error);
       toast.error('重新排序失敗');
-      if (currentTrip) {
-        await loadTrip(currentTrip.trip_id);
-      }
+      // 失敗時 rollback
+      await loadTrip(currentTrip.trip_id);
+    }
+  },
+
+  // 拖曳重新排序 Day（整天移動）
+  reorderDay: async (dayId: string, targetPosition: number) => {
+    const { currentTrip, loadTrip } = get();
+    if (!currentTrip) return;
+
+    // 樂觀更新：先在本地重排 days，避免等待 API 期間 UI 凍結
+    const currentDays = get().itineraryDays;
+    const movingDay = currentDays.find(d => d.day_id === dayId);
+    if (!movingDay) return;
+
+    const reordered = currentDays.filter(d => d.day_id !== dayId);
+    reordered.splice(targetPosition, 0, movingDay);
+    // 更新 day_number（1-based）
+    const optimisticDays = reordered.map((d, i) => ({ ...d, day_number: i + 1 }));
+    set({ itineraryDays: optimisticDays });
+
+    try {
+      await itineraryService.reorderDay(dayId, targetPosition);
+      // API 成功後用真實資料同步
+      await loadTrip(currentTrip.trip_id);
+    } catch (error) {
+      console.error('Day 重新排序失敗:', error);
+      toast.error('Day 重新排序失敗');
+      // 回滾：重新載入真實資料
+      await loadTrip(currentTrip.trip_id);
     }
   },
 
