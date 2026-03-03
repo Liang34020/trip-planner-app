@@ -226,3 +226,11 @@
     opacity: 0.5;
   }
 }
+/* 加到 index.css 底部 */
+.leaflet-popup-content-wrapper {
+  border-radius: 12px !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15) !important;
+}
+.leaflet-popup-tip {
+  box-shadow: none !important;
+}
