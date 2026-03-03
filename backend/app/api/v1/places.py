@@ -55,20 +55,6 @@ async def get_places(
     return places
 
 
-@router.get("/{place_id}", response_model=PlaceResponse)
-async def get_place(place_id: str, db: AsyncSession = Depends(get_db)):
-    """獲取單個地點詳情（原有端點，保持不變）"""
-    result = await db.execute(select(Place).where(Place.place_id == place_id))
-    place = result.scalar_one_or_none()
-    if not place:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="地點不存在")
-    return place
-
-
-# ─────────────────────────────────────────────
-# B-3：Autocomplete 端點
-# ─────────────────────────────────────────────
-
 @router.get("/autocomplete", response_model=List[AutocompleteItem])
 async def autocomplete_places(
     q: str = Query(..., min_length=1, description="搜尋關鍵字"),
@@ -96,7 +82,6 @@ async def autocomplete_places(
     for place in db_places:
         if place.status in (PlaceStatus.CLOSED, PlaceStatus.HIDDEN):
             if place.google_place_id not in google_place_ids:
-                # Google 沒有此點 → 歇業警告置頂
                 closed_items.append(AutocompleteItem(
                     place_id=str(place.place_id),
                     display_name=place.name,
@@ -130,6 +115,33 @@ async def autocomplete_places(
 
 
 # ─────────────────────────────────────────────
+# B-4：預留 Google Maps 連結匯入（靜態 POST，也需在動態路由之前）
+# ─────────────────────────────────────────────
+
+class ImportRequest(BaseModel):
+    url: str
+
+@router.post("/import-from-maps", response_model=PlaceDetailResponse)
+async def import_from_maps_url(
+    body: ImportRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    【預留功能】從 Google Maps 分享連結匯入景點
+    """
+    url = body.url.strip()
+    google_place_id = await _extract_place_id_from_url(url)
+
+    if not google_place_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="無法從此連結解析景點資訊，請確認連結格式正確",
+        )
+
+    return await get_place_detail(google_place_id, db)
+
+
+# ─────────────────────────────────────────────
 # B-3：Place Detail 端點
 # ─────────────────────────────────────────────
 
@@ -149,7 +161,6 @@ async def get_place_detail(
     now = datetime.now(timezone.utc)
     cache_cutoff = now - timedelta(days=CACHE_VALID_DAYS)
 
-    # 判斷傳入的是 google_place_id 還是 DB uuid
     is_uuid = _is_uuid(google_place_id)
 
     if is_uuid:
@@ -160,12 +171,9 @@ async def get_place_detail(
     result = await db.execute(stmt)
     place = result.scalar_one_or_none()
 
-    # DB 有且資料還新鮮 → 直接回傳
     if place and place.last_updated and place.last_updated > cache_cutoff:
         return place
 
-    # 需要呼叫 Google API
-    # 若是 uuid 形式但找到了 place，用 place.google_place_id 打 Google
     g_place_id = google_place_id
     if is_uuid and place and place.google_place_id:
         g_place_id = place.google_place_id
@@ -173,52 +181,29 @@ async def get_place_detail(
     detail = await google_places_service.place_details(g_place_id)
 
     if not detail:
-        # Google 沒回傳（可能歇業或 API 失敗）
         if place:
-            # 有 DB 資料就回傳舊的（不更新 status，讓使用者知道景點存在）
             return place
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="找不到此景點資料"
         )
 
-    # Upsert DB
     place = await _upsert_place(db, detail, existing=place)
     return place
 
 
 # ─────────────────────────────────────────────
-# B-4：預留 Google Maps 連結匯入
+# 原有端點（動態路由放最後）
 # ─────────────────────────────────────────────
 
-class ImportRequest(BaseModel):
-    url: str
-
-@router.post("/import-from-maps", response_model=PlaceDetailResponse)
-async def import_from_maps_url(
-    body: ImportRequest,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    【預留功能】從 Google Maps 分享連結匯入景點
-
-    支援格式：
-    - https://maps.app.goo.gl/xxxxxxx    （短網址，自動展開）
-    - https://www.google.com/maps/place/  （長網址，直接解析）
-
-    流程：解析 place_id → 走同一套 place_details 流程
-    """
-    url = body.url.strip()
-    google_place_id = await _extract_place_id_from_url(url)
-
-    if not google_place_id:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="無法從此連結解析景點資訊，請確認連結格式正確",
-        )
-
-    # 複用 detail 端點邏輯
-    return await get_place_detail(google_place_id, db)
+@router.get("/{place_id}", response_model=PlaceResponse)
+async def get_place(place_id: str, db: AsyncSession = Depends(get_db)):
+    """獲取單個地點詳情（原有端點，保持不變）"""
+    result = await db.execute(select(Place).where(Place.place_id == place_id))
+    place = result.scalar_one_or_none()
+    if not place:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="地點不存在")
+    return place
 
 
 # ─────────────────────────────────────────────
